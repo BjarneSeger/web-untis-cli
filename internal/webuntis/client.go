@@ -2,10 +2,14 @@
 // the WebUntis web UI plus the public JSON-RPC API.
 //
 // Authentication: a JSESSIONID is obtained via the JSON-RPC "authenticate"
-// method (fallback: the web form login j_spring_security_check). With that
-// session cookie, /WebUntis/api/token/new returns a short lived JWT which is
-// sent as Bearer token to the /WebUntis/api/rest/view/... endpoints. Older
-// endpoints under /WebUntis/api/... only need the session cookie.
+// method (fallback: the web form login j_spring_security_check). Accounts
+// that can only sign in via Microsoft/SSO use the Untis Mobile secret
+// instead: getUserData2017 on /WebUntis/jsonrpc_intern.do with a TOTP
+// (RFC 6238) derived from the key shown next to the QR code under
+// "Zugriff über Untis Mobile"; it yields the same JSESSIONID. With that session cookie,
+// /WebUntis/api/token/new returns a short lived JWT which is sent as Bearer
+// token to the /WebUntis/api/rest/view/... endpoints. Older endpoints under
+// /WebUntis/api/... only need the session cookie.
 package webuntis
 
 import (
@@ -44,6 +48,7 @@ type Client struct {
 
 	appData  *AppData
 	password func() (string, error)
+	secret   func() (string, error)
 }
 
 // Options configure a Client.
@@ -53,6 +58,9 @@ type Options struct {
 	// Password is called when a (re-)login is needed. Default: the
 	// profile's Password field, then $WEBUNTIS_PASSWORD.
 	Password func() (string, error)
+	// Secret is the same for the Untis Mobile secret. Default: the
+	// profile's Secret field, then $WEBUNTIS_SECRET.
+	Secret func() (string, error)
 }
 
 // New creates a client for the given profile and restores its session.
@@ -68,6 +76,7 @@ func New(p *config.Profile, opts Options) (*Client, error) {
 		jar:      jar,
 		session:  p.LoadSession(),
 		password: opts.Password,
+		secret:   opts.Secret,
 	}
 	c.http = &http.Client{Jar: jar, Timeout: 60 * time.Second}
 	c.restoreCookies()
@@ -143,13 +152,16 @@ func (c *Client) SaveSession() error {
 
 func (c *Client) base() string { return c.Profile.BaseURL() }
 
-func (c *Client) hasSessionCookie() bool {
+func (c *Client) hasSessionCookie() bool { return c.sessionCookie() != "" }
+
+// sessionCookie returns the current JSESSIONID value ("" if none).
+func (c *Client) sessionCookie() string {
 	for _, ck := range c.jar.Cookies(&url.URL{Scheme: "https", Host: c.Profile.Server, Path: "/WebUntis/"}) {
 		if ck.Name == "JSESSIONID" && ck.Value != "" {
-			return true
+			return ck.Value
 		}
 	}
-	return false
+	return ""
 }
 
 func (c *Client) setSchoolCookies(sessionID string) {
@@ -214,7 +226,7 @@ func redactURL(s string) string {
 	q := u.Query()
 	for k := range q {
 		lk := strings.ToLower(k)
-		if strings.Contains(lk, "token") || strings.Contains(lk, "code") || strings.Contains(lk, "password") || strings.Contains(lk, "sig") {
+		if strings.Contains(lk, "token") || strings.Contains(lk, "code") || strings.Contains(lk, "password") || strings.Contains(lk, "sig") || lk == "key" {
 			q.Set(k, "***")
 		}
 	}

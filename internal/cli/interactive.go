@@ -36,18 +36,19 @@ func (a *app) setupCmd() *cobra.Command {
 
   1. choose an existing profile or create a new one
   2. search the school (name, city, login name or URL) with live results
-  3. enter username and password (optionally not stored)
+  3. choose the login method: username & password, or the Untis Mobile
+     key (accounts that sign in via Microsoft/SSO); optionally not stored
   4. choose the default student (parent accounts with several children)
 
 Same as running "webuntis login" without arguments on a terminal.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !interactive() {
-				return errors.New("setup needs a terminal; use `webuntis login <school> --user … --password-stdin` in scripts")
+				return errors.New("setup needs a terminal; use `webuntis login <school> --user … --password-stdin` (Microsoft/SSO accounts: --secret-stdin) in scripts")
 			}
 			return a.runSetup(cmd.Context(), noStore)
 		},
 	}
-	cmd.Flags().BoolVar(&noStore, "no-store-password", false, "do not store the password (neither keyring nor file)")
+	cmd.Flags().BoolVar(&noStore, "no-store-password", false, "do not store the password / Untis Mobile key (neither keyring nor file)")
 	return cmd
 }
 
@@ -141,6 +142,9 @@ func (a *app) runSetup(ctx context.Context, noStore bool) error {
 			label := n
 			if p, err := config.Load(n); err == nil {
 				label = fmt.Sprintf("%s — %s, %s", n, firstNonEmpty(p.SchoolDisplayName, p.School), p.Username)
+				if p.Method() == config.AuthSecret {
+					label += " · Untis Mobile"
+				}
 			}
 			opts = append(opts, huh.NewOption(label, n))
 		}
@@ -176,15 +180,15 @@ func (a *app) runSetup(ctx context.Context, noStore bool) error {
 
 	// ---- 2. school + credentials
 	var school webuntis.School
-	query, user := "", ""
+	query, user, method := "", "", config.AuthPassword
 	if existing != nil {
 		school = webuntis.School{Server: existing.Server, LoginName: existing.School, TenantID: existing.TenantID,
 			DisplayName: firstNonEmpty(existing.SchoolDisplayName, existing.School)}
-		query, user = existing.School, existing.Username
+		query, user, method = existing.School, existing.Username, existing.Method()
 	}
 	storePw := !noStore
 	searcher := &schoolSearcher{cache: map[string][]huh.Option[webuntis.School]{}}
-	password := ""
+	password, key := "", ""
 
 	for attempt := 1; ; attempt++ {
 		groups := []*huh.Group{
@@ -202,30 +206,17 @@ func (a *app) runSetup(ctx context.Context, noStore bool) error {
 						return nil
 					}),
 			),
-			huh.NewGroup(
-				huh.NewInput().TitleFunc(func() string { return "Benutzername bei " + firstNonEmpty(school.DisplayName, school.LoginName) }, &school).
-					Value(&user).Validate(notEmpty("Benutzername")),
-				huh.NewInput().Title("Passwort").EchoMode(huh.EchoModePassword).Value(&password).Validate(notEmpty("Passwort")),
-				huh.NewConfirm().Title("Passwort speichern?").
-					DescriptionFunc(func() string {
-						if a.noKeyring {
-							return "Erlaubt automatische Neuanmeldung; gespeichert in config.json (Dateimodus 0600)."
-						}
-						return "Erlaubt automatische Neuanmeldung; gespeichert im Schlüsselbund des Systems."
-					}, nil).
-					Affirmative("Ja").Negative("Nein").Value(&storePw),
-			),
 		}
+		groups = append(groups, credentialGroups(&school, &method, &user, &password, &key, &storePw, a.noKeyring)...)
 		if attempt > 1 {
 			groups = groups[1:] // school already chosen, only retry credentials
 		}
 		if err := huh.NewForm(groups...).WithTheme(theme).RunWithContext(ctx); err != nil {
 			return abortErr(err)
 		}
-		p := &config.Profile{Name: name, Server: school.Server, School: school.LoginName, TenantID: school.TenantID,
-			SchoolDisplayName: school.DisplayName, Username: strings.TrimSpace(user)}
+		p, credential := profileFromWizard(name, school, method, user, password, key)
 		fmt.Fprintf(os.Stderr, "Anmelden bei %s …\n", firstNonEmpty(school.DisplayName, school.LoginName))
-		ad, err := a.performLogin(ctx, p, existing, password, !storePw)
+		ad, err := a.performLogin(ctx, p, existing, credential, !storePw)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "✗", err)
 			retry := true
@@ -233,7 +224,7 @@ func (a *app) runSetup(ctx context.Context, noStore bool) error {
 				Affirmative("Ja").Negative("Abbrechen").Value(&retry))).WithTheme(theme).RunWithContext(ctx); ferr != nil || !retry {
 				return err
 			}
-			password = ""
+			password, key = "", ""
 			continue
 		}
 
@@ -272,6 +263,60 @@ func (a *app) runSetup(ctx context.Context, noStore bool) error {
 		}
 		return nil
 	}
+}
+
+// credentialGroups builds the wizard groups for the login method: the
+// method select with the username, the password (password method) or the
+// Untis Mobile key (secret method), and the "store credentials" confirmation.
+func credentialGroups(school *webuntis.School, method, user, password, key *string, store *bool, noKeyring bool) []*huh.Group {
+	where := "im Schlüsselbund des Systems"
+	if noKeyring {
+		where = "in config.json (Dateimodus 0600)"
+	}
+	return []*huh.Group{
+		huh.NewGroup(
+			huh.NewSelect[string]().Title("Anmeldeart").
+				Description("Konten mit Microsoft/Office-365-Anmeldung (meist Schüler) haben kein WebUntis-Passwort; sie nutzen den Untis Mobile Schlüssel.").
+				Options(
+					huh.NewOption("Benutzername & Passwort", config.AuthPassword),
+					huh.NewOption("Microsoft / SSO (Untis Mobile Schlüssel)", config.AuthSecret),
+				).Value(method),
+			huh.NewInput().TitleFunc(func() string { return "Benutzername bei " + firstNonEmpty(school.DisplayName, school.LoginName) }, school).
+				Value(user).Validate(notEmpty("Benutzername")),
+		),
+		huh.NewGroup(
+			huh.NewInput().Title("Passwort").EchoMode(huh.EchoModePassword).Value(password).Validate(notEmpty("Passwort")),
+		).WithHideFunc(func() bool { return *method != config.AuthPassword }),
+		huh.NewGroup(
+			huh.NewInput().Title("Untis Mobile Schlüssel").
+				Description("In WebUntis: Profil → Freigaben → „Zugriff über Untis Mobile“ → Anzeigen. Den neben dem QR-Code angezeigten Schlüssel einfügen.").
+				EchoMode(huh.EchoModePassword).Value(key).Validate(validateSecret),
+		).WithHideFunc(func() bool { return *method != config.AuthSecret }),
+		huh.NewGroup(
+			huh.NewConfirm().Title("Zugangsdaten speichern?").
+				Description("Erlaubt automatische Neuanmeldung; Passwort bzw. Schlüssel wird " + where + " gespeichert.").
+				Affirmative("Ja").Negative("Nein").Value(store),
+		),
+	}
+}
+
+func validateSecret(s string) error {
+	if _, err := webuntis.ParseSecret(s); err != nil {
+		return errors.New("ungültiger Schlüssel (nur Buchstaben A–Z und Ziffern 2–7)")
+	}
+	return nil
+}
+
+// profileFromWizard builds the profile from the wizard inputs and returns it
+// with the credential to log in with (password or normalized Untis Mobile key).
+func profileFromWizard(name string, school webuntis.School, method, user, password, key string) (*config.Profile, string) {
+	p := &config.Profile{Name: name, Server: school.Server, School: school.LoginName, TenantID: school.TenantID,
+		SchoolDisplayName: school.DisplayName, Username: strings.TrimSpace(user), AuthMethod: method}
+	if method != config.AuthSecret {
+		return p, password
+	}
+	k, _ := webuntis.ParseSecret(key) // validated by the form
+	return p, k
 }
 
 // formTheme returns the theme for interactive forms. The default uses only

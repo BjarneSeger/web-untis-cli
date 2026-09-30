@@ -35,9 +35,11 @@ func prompt(label string) (string, error) {
 	return strings.TrimSpace(s), nil
 }
 
-func promptPassword(label string) (string, error) {
+// promptHidden prompts on stderr and reads a line from the terminal without
+// echo; noTerminal is the error when stdin is not a terminal.
+func promptHidden(label, noTerminal string) (string, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errors.New("no terminal for password prompt: use --password-stdin or WEBUNTIS_PASSWORD")
+		return "", errors.New(noTerminal)
 	}
 	fmt.Fprint(os.Stderr, label)
 	b, err := term.ReadPassword(int(os.Stdin.Fd()))
@@ -45,7 +47,20 @@ func promptPassword(label string) (string, error) {
 	return string(b), err
 }
 
-func readStdinSecret() (string, error) {
+func promptPassword(label string) (string, error) {
+	return promptHidden(label, "no terminal for password prompt: use --password-stdin or WEBUNTIS_PASSWORD")
+}
+
+func promptKey(label string) (string, error) {
+	return promptHidden(label, "no terminal for the Untis Mobile key prompt: use --secret-stdin or WEBUNTIS_SECRET")
+}
+
+// readStdinSecret reads a secret line from stdin. On a terminal it prompts
+// with label and hides the input.
+func readStdinSecret(label string) (string, error) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return promptHidden(label, "")
+	}
 	b, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && b == "" {
 		return "", err
@@ -108,16 +123,22 @@ func firstNonEmpty(s ...string) string {
 	return ""
 }
 
+// loginFlags are the parsed flags of "webuntis login".
+type loginFlags struct {
+	school, user                          string
+	pwStdin, secret, secretStdin, noStore bool
+}
+
 func (a *app) loginCmd() *cobra.Command {
-	var school, user string
-	var pwStdin, noStore bool
+	var f loginFlags
 	cmd := &cobra.Command{
 		Use:   "login [SCHOOL-URL | SERVER | SCHOOL]",
 		Short: "Log in and store school + credentials",
 		Long: `Log in to WebUntis. School and username are stored in the profile
-(~/.cache/webuntis-cli/<profile>/config.json), the password in the system
-keyring (Secret Service / macOS Keychain / Windows Credential Manager) once
-WebUntis accepted it. With --no-keyring it goes to config.json (mode 0600).
+(~/.cache/webuntis-cli/<profile>/config.json), the password (or the Untis
+Mobile key) in the system keyring (Secret Service / macOS Keychain /
+Windows Credential Manager) once WebUntis accepted it. With --no-keyring it
+goes to config.json (mode 0600).
 
 Without arguments on a terminal, an interactive setup starts (same as
 "webuntis setup"): pick/create a profile, search the school, enter
@@ -125,87 +146,202 @@ credentials, choose the default student.
 
 The school can be given as URL (https://ge-huellhorst.webuntis.com/today),
 host name, or school login name. Use --no-store-password to only keep the
-session cookie (you will have to log in again when it expires).`,
+session cookie (you will have to log in again when it expires).
+
+Accounts that can only sign in via Microsoft/Office 365 (typically students)
+have no WebUntis password. Use the Untis Mobile key instead: in WebUntis open
+Profil → Freigaben → "Zugriff über Untis Mobile" → Anzeigen and copy the key
+shown next to the QR code. Enter it with --secret (hidden prompt),
+--secret-stdin or $WEBUNTIS_SECRET, or choose "Microsoft / SSO" in
+"webuntis setup". "webuntis login SCHOOL" reuses the stored key of such a
+profile; --secret enters a new one.
+
+When reading the password or key from stdin, pass the school and -u: there
+is no prompt for them.`,
 		Example: `  webuntis login https://ge-huellhorst.webuntis.com
   webuntis login ge-huellhorst --user jane@example.com
   echo "$PW" | webuntis login ge-huellhorst -u jane --password-stdin
-  webuntis login -p kid2 neilo.webuntis.com --school my-school`,
+  webuntis login -p kid2 neilo.webuntis.com --school my-school
+  webuntis login -p kid1 ge-huellhorst -u max --secret
+  echo "$KEY" | webuntis login -p kid1 ge-huellhorst -u max --secret-stdin`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			name := a.profileName()
-			if err := config.ValidateProfileName(name); err != nil {
-				return err
-			}
-			if len(args) == 0 && school == "" && user == "" && !pwStdin && interactive() {
-				return a.runSetup(ctx, noStore)
-			}
-			existing, _ := config.Load(name)
-			input := ""
+			arg := ""
 			if len(args) > 0 {
-				input = args[0]
+				arg = args[0]
 			}
-			if input == "" && school == "" && existing != nil {
-				input, school = existing.Server, existing.School
-			}
-			if input == "" && school == "" {
-				var err error
-				if input, err = prompt("School (URL, server or name): "); err != nil {
-					return err
-				}
-			}
-			server, loginName, tenant, display, err := resolveSchool(ctx, input, school)
-			if err != nil {
-				return err
-			}
-			if user == "" && existing != nil && existing.School == loginName {
-				user = existing.Username
-			}
-			if user == "" {
-				if user, err = prompt("Username: "); err != nil {
-					return err
-				}
-			}
-			var password string
-			switch {
-			case pwStdin:
-				password, err = readStdinSecret()
-			case os.Getenv("WEBUNTIS_PASSWORD") != "":
-				password = os.Getenv("WEBUNTIS_PASSWORD")
-			default:
-				password, err = promptPassword(fmt.Sprintf("Password for %s (school %s): ", user, loginName))
-			}
-			if err != nil {
-				return err
-			}
-			p := &config.Profile{Name: name, Server: server, School: loginName, TenantID: tenant, SchoolDisplayName: display, Username: user}
-			ad, err := a.performLogin(ctx, p, existing, password, noStore)
-			if err != nil {
-				return err
-			}
-			return a.printLoginSummary(p, ad)
+			return a.runLogin(cmd.Context(), f, arg)
 		},
 	}
-	cmd.Flags().StringVar(&school, "school", "", "school login name (if not part of the URL)")
-	cmd.Flags().StringVarP(&user, "user", "u", "", "username")
-	cmd.Flags().BoolVar(&pwStdin, "password-stdin", false, "read the password from stdin")
-	cmd.Flags().BoolVar(&noStore, "no-store-password", false, "do not store the password (neither keyring nor file)")
+	cmd.Flags().StringVar(&f.school, "school", "", "school login name (if not part of the URL)")
+	cmd.Flags().StringVarP(&f.user, "user", "u", "", "username")
+	cmd.Flags().BoolVar(&f.pwStdin, "password-stdin", false, "read the password from stdin")
+	cmd.Flags().BoolVar(&f.secret, "secret", false, "log in with the Untis Mobile key (Microsoft/SSO accounts); prompts for it")
+	cmd.Flags().BoolVar(&f.secretStdin, "secret-stdin", false, "read the Untis Mobile key from stdin (Microsoft/SSO accounts)")
+	cmd.Flags().BoolVar(&f.noStore, "no-store-password", false, "do not store the password / Untis Mobile key (neither keyring nor file; only the session is kept)")
+	cmd.MarkFlagsMutuallyExclusive("password-stdin", "secret", "secret-stdin")
 	return cmd
 }
 
-// performLogin logs in with p and password, stores the password (system
-// keyring, or config.json with --no-keyring) only after the server accepted
-// it, saves the profile and makes it current (unless --profile was given).
-func (a *app) performLogin(ctx context.Context, p, existing *config.Profile, password string, noStore bool) (*webuntis.AppData, error) {
+func (a *app) runLogin(ctx context.Context, f loginFlags, arg string) error {
+	name := a.profileName()
+	if err := config.ValidateProfileName(name); err != nil {
+		return err
+	}
+	if arg == "" && f.school == "" && f.user == "" && !f.pwStdin && !f.secret && !f.secretStdin && interactive() {
+		return a.runSetup(ctx, f.noStore)
+	}
+	if (f.secret || f.secretStdin) && looksLikeKey(arg) {
+		return errors.New("do not pass the Untis Mobile key as argument: --secret prompts for it, --secret-stdin reads it from stdin")
+	}
+	stdin := f.pwStdin || f.secretStdin // stdin carries the credential, so no prompts
+	existing, _ := config.Load(name)
+	input, school := arg, f.school
+	if input == "" && school == "" && existing != nil {
+		input, school = existing.Server, existing.School
+	}
+	if input == "" && school == "" {
+		if stdin {
+			return errors.New("school missing: pass it as argument when reading the credential from stdin")
+		}
+		var err error
+		if input, err = prompt("School (URL, server or name): "); err != nil {
+			return err
+		}
+	}
+	server, loginName, tenant, display, err := resolveSchool(ctx, input, school)
+	if err != nil {
+		return err
+	}
+	user := f.user
+	if user == "" && existing != nil && strings.EqualFold(existing.School, loginName) {
+		user = existing.Username
+	}
+	if user == "" {
+		if stdin {
+			return errors.New("username missing: pass -u when reading the credential from stdin")
+		}
+		if user, err = prompt("Username: "); err != nil {
+			return err
+		}
+	}
+	p := &config.Profile{Name: name, Server: server, School: loginName, TenantID: tenant, SchoolDisplayName: display, Username: user,
+		AuthMethod: config.AuthSecret}
+	credential, useSecret, err := a.secretInput(f, p, existing)
+	if err != nil {
+		return err
+	}
+	if !useSecret {
+		p.AuthMethod = config.AuthPassword
+		if credential, err = passwordInput(f, user, loginName); err != nil {
+			return err
+		}
+	}
+	ad, err := a.performLogin(ctx, p, existing, credential, f.noStore)
+	if err != nil {
+		return err
+	}
+	return a.printLoginSummary(p, ad)
+}
+
+// sameAccount reports whether p is the same WebUntis account as existing.
+func sameAccount(existing, p *config.Profile) bool {
+	return existing != nil && strings.EqualFold(existing.School, p.School) && strings.EqualFold(existing.Username, p.Username)
+}
+
+// looksLikeKey reports whether s looks like an Untis Mobile key (upper-case
+// base32) rather than a school URL, host or login name.
+func looksLikeKey(s string) bool {
+	if s == "" || s != strings.ToUpper(s) || strings.ContainsAny(s, ".:/") {
+		return false
+	}
+	_, err := webuntis.ParseSecret(s)
+	return err == nil
+}
+
+// secretInput resolves the Untis Mobile key for p. Explicit flags win
+// (--secret-stdin; --secret uses $WEBUNTIS_SECRET or prompts). Otherwise an
+// existing profile of the same account keeps its login method: password
+// profiles use the password path, key profiles $WEBUNTIS_SECRET or the stored
+// key. New accounts use $WEBUNTIS_SECRET if set. ok is false when the
+// password path should be used instead.
+func (a *app) secretInput(f loginFlags, p, existing *config.Profile) (key string, ok bool, err error) {
+	label := fmt.Sprintf("Untis Mobile key for %s (school %s): ", p.Username, p.School)
+	envSecret, envPassword := os.Getenv("WEBUNTIS_SECRET"), os.Getenv("WEBUNTIS_PASSWORD")
+	known := sameAccount(existing, p)
+	var raw string
+	switch {
+	case f.secretStdin:
+		raw, err = readStdinSecret(label)
+	case f.secret:
+		if raw = envSecret; raw == "" {
+			raw, err = promptKey(label)
+		}
+	case f.pwStdin, known && existing.Method() != config.AuthSecret:
+		return "", false, nil
+	case !known && envSecret != "" && envPassword != "":
+		return "", false, errors.New("both WEBUNTIS_SECRET and WEBUNTIS_PASSWORD are set: unset one of them, or use --secret / --password-stdin")
+	case envSecret != "":
+		raw = envSecret
+	case known && envPassword != "":
+		return "", false, nil // switch a key profile to the password
+	case known:
+		raw, err = a.storedKey(existing, p, label)
+	default:
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if key, err = webuntis.ParseSecret(raw); err != nil {
+		return "", false, err
+	}
+	return key, true, nil
+}
+
+// storedKey returns the stored Untis Mobile key of existing. It prompts for
+// the key when none is stored, the keyring fails, or the server changed (the
+// stored key is not sent to another host unasked).
+func (a *app) storedKey(existing, p *config.Profile, label string) (string, error) {
+	if strings.EqualFold(existing.Server, p.Server) {
+		key, _, err := secrets.Get(existing, secrets.MobileSecret, a.noKeyring)
+		if err == nil {
+			return key, nil
+		}
+		if !errors.Is(err, secrets.ErrNotFound) {
+			fmt.Fprintln(os.Stderr, "Warning:", err)
+		}
+	}
+	return promptKey(label)
+}
+
+// passwordInput reads the password from stdin, $WEBUNTIS_PASSWORD or a prompt.
+func passwordInput(f loginFlags, user, school string) (string, error) {
+	switch {
+	case f.pwStdin:
+		return readStdinSecret(fmt.Sprintf("Password for %s (school %s): ", user, school))
+	case os.Getenv("WEBUNTIS_PASSWORD") != "":
+		return os.Getenv("WEBUNTIS_PASSWORD"), nil
+	default:
+		return promptPassword(fmt.Sprintf("Password for %s (school %s): ", user, school))
+	}
+}
+
+// performLogin logs in with p and credential (the password or the Untis
+// Mobile secret, see p.AuthMethod), stores the credential (system keyring, or
+// config.json with --no-keyring) only after the server accepted it, saves the
+// profile and makes it current (unless --profile was given).
+func (a *app) performLogin(ctx context.Context, p, existing *config.Profile, credential string, noStore bool) (*webuntis.AppData, error) {
 	if existing != nil {
 		p.SMTP, p.Student, p.Timezone, p.CredentialStore = existing.SMTP, existing.Student, existing.Timezone, existing.CredentialStore
-		if existing.School == p.School && existing.Username == p.Username {
-			p.Password = existing.Password // keep a file-stored password until replaced below
+		if sameAccount(existing, p) {
+			p.Password, p.Secret = existing.Password, existing.Secret // keep file-stored credentials until replaced below
 		}
 	}
 	_ = p.ClearSession()
 	c, err := webuntis.New(p, webuntis.Options{Debug: a.debug, NoCache: true,
-		Password: func() (string, error) { return password, nil }})
+		Password: func() (string, error) { return credential, nil },
+		Secret:   func() (string, error) { return credential, nil }})
 	if err != nil {
 		return nil, err
 	}
@@ -216,14 +352,29 @@ func (a *app) performLogin(ctx context.Context, p, existing *config.Profile, pas
 	if err != nil {
 		return nil, err
 	}
+	if p.Student != "" {
+		if _, err := c.ResolveStudent(ctx, ""); err != nil { // e.g. switched to another account
+			fmt.Fprintf(os.Stderr, "Hinweis: Standard-Schüler %q passt nicht zu diesem Konto und wurde entfernt.\n", p.Student)
+			p.Student = ""
+		}
+	}
+	kind, other := secrets.WebUntis, secrets.MobileSecret
+	if p.AuthMethod == config.AuthSecret {
+		kind, other = other, kind
+	}
+	if secrets.Where(p, other, a.noKeyring) != secrets.SourceNone { // left over from the other login method
+		if err := secrets.Delete(p, other, a.noKeyring); err != nil {
+			fmt.Fprintln(os.Stderr, "Warning:", err)
+		}
+	}
 	switch {
 	case noStore:
-		if err := secrets.Delete(p, secrets.WebUntis, a.noKeyring); err != nil {
+		if err := secrets.Delete(p, kind, a.noKeyring); err != nil {
 			fmt.Fprintln(os.Stderr, "Warning:", err)
 		}
 	default:
-		if err := secrets.Set(p, secrets.WebUntis, password, a.noKeyring); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: password not stored: %v\n", err)
+		if err := secrets.Set(p, kind, credential, a.noKeyring); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: credentials not stored: %v\n", err)
 		}
 	}
 	if err := p.Save(); err != nil {
@@ -234,6 +385,14 @@ func (a *app) performLogin(ctx context.Context, p, existing *config.Profile, pas
 		_ = config.SetCurrentProfile(p.Name)
 	}
 	return ad, nil
+}
+
+// authLabel describes the login method of a profile.
+func authLabel(p *config.Profile) string {
+	if p.Method() == config.AuthSecret {
+		return "Untis Mobile Schlüssel (Microsoft/SSO)"
+	}
+	return "Benutzername & Passwort"
 }
 
 func (a *app) printLoginSummary(p *config.Profile, ad *webuntis.AppData) error {
@@ -248,7 +407,7 @@ func (a *app) printLoginSummary(p *config.Profile, ad *webuntis.AppData) error {
 		person = ad.User.Person.DisplayName
 	}
 	d.KV("Schule", render.Esc(firstNonEmpty(p.SchoolDisplayName, ad.Tenant.DisplayName, p.School)),
-		"Server", p.Server, "Benutzer", "`"+ad.User.Name+"`", "Person", render.Esc(person),
+		"Server", p.Server, "Benutzer", "`"+ad.User.Name+"`", "Anmeldeart", authLabel(p), "Person", render.Esc(person),
 		"Rollen", strings.Join(ad.User.Roles, ", "), "Schüler", strings.Join(kids, ", "),
 		"Standard-Schüler", render.Esc(p.Student),
 		"Schuljahr", ad.CurrentSchoolYear.Name, "Profil", p.Name, "Gespeichert in", p.Path())
@@ -283,23 +442,25 @@ func (a *app) logoutCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&forget, "forget", false, "also delete stored passwords (keyring), settings and cache of the profile")
+	cmd.Flags().BoolVar(&forget, "forget", false, "also delete stored credentials (keyring), settings and cache of the profile")
 	return cmd
 }
 
 type statusInfo struct {
-	Profile   string             `json:"profile" yaml:"profile"`
-	Server    string             `json:"server" yaml:"server"`
-	School    string             `json:"school" yaml:"school"`
-	Display   string             `json:"schoolDisplayName" yaml:"schoolDisplayName"`
-	Username  string             `json:"username" yaml:"username"`
-	Roles     []string           `json:"roles" yaml:"roles"`
-	Students  []webuntis.Student `json:"students" yaml:"students"`
-	Year      string             `json:"schoolYear" yaml:"schoolYear"`
-	Password  string             `json:"passwordStorage" yaml:"passwordStorage"` // keyring, file or empty
-	SMTPPass  string             `json:"smtpPasswordStorage,omitempty" yaml:"smtpPasswordStorage,omitempty"`
-	SMTP      bool               `json:"smtpConfigured" yaml:"smtpConfigured"`
-	ConfigDir string             `json:"configDir" yaml:"configDir"`
+	Profile    string             `json:"profile" yaml:"profile"`
+	Server     string             `json:"server" yaml:"server"`
+	School     string             `json:"school" yaml:"school"`
+	Display    string             `json:"schoolDisplayName" yaml:"schoolDisplayName"`
+	Username   string             `json:"username" yaml:"username"`
+	Roles      []string           `json:"roles" yaml:"roles"`
+	Students   []webuntis.Student `json:"students" yaml:"students"`
+	Year       string             `json:"schoolYear" yaml:"schoolYear"`
+	AuthMethod string             `json:"authMethod" yaml:"authMethod"`
+	Password   string             `json:"passwordStorage" yaml:"passwordStorage"` // keyring, file or empty
+	Secret     string             `json:"secretStorage,omitempty" yaml:"secretStorage,omitempty"`
+	SMTPPass   string             `json:"smtpPasswordStorage,omitempty" yaml:"smtpPasswordStorage,omitempty"`
+	SMTP       bool               `json:"smtpConfigured" yaml:"smtpConfigured"`
+	ConfigDir  string             `json:"configDir" yaml:"configDir"`
 }
 
 func (a *app) statusCmd() *cobra.Command {
@@ -320,7 +481,11 @@ func (a *app) statusCmd() *cobra.Command {
 			p := c.Profile
 			info := statusInfo{Profile: p.Name, Server: p.Server, School: p.School, Display: firstNonEmpty(p.SchoolDisplayName, ad.Tenant.DisplayName),
 				Username: ad.User.Name, Roles: ad.User.Roles, Students: students, Year: ad.CurrentSchoolYear.Name,
-				Password: string(secrets.Where(p, secrets.WebUntis, a.noKeyring)), SMTP: mailer.Validate(p.SMTP) == nil, ConfigDir: p.Path()}
+				AuthMethod: p.Method(), Password: string(secrets.Where(p, secrets.WebUntis, a.noKeyring)),
+				SMTP: mailer.Validate(p.SMTP) == nil, ConfigDir: p.Path()}
+			if info.AuthMethod == config.AuthSecret {
+				info.Secret = string(secrets.Where(p, secrets.MobileSecret, a.noKeyring))
+			}
 			if info.SMTP && p.SMTP.Username != "" {
 				info.SMTPPass = string(secrets.Where(p, secrets.SMTP, a.noKeyring))
 			}
@@ -333,7 +498,8 @@ func (a *app) statusCmd() *cobra.Command {
 				}
 				d.KV("Profil", info.Profile, "Server", info.Server, "Schule", info.School, "Benutzer", "`"+info.Username+"`",
 					"Rollen", strings.Join(info.Roles, ", "), "Schüler", strings.Join(s, ", "), "Schuljahr", info.Year,
-					"Passwort gespeichert", storageLabel(info.Password),
+					"Anmeldeart", authLabel(p),
+					"Zugangsdaten gespeichert", storageLabel(map[bool]string{true: info.Secret, false: info.Password}[info.AuthMethod == config.AuthSecret]),
 					"SMTP-Passwort", map[bool]string{true: storageLabel(info.SMTPPass), false: ""}[info.SMTPPass != "" || (info.SMTP && p.SMTP.Username != "")],
 					"SMTP konfiguriert", render.Check(info.SMTP)+map[bool]string{true: "", false: "nein"}[info.SMTP],
 					"Verzeichnis", info.ConfigDir)
@@ -419,14 +585,18 @@ func (a *app) configCmd() *cobra.Command {
 			if masked.Password != "" {
 				masked.Password = "********"
 			}
+			if masked.Secret != "" {
+				masked.Secret = "********"
+			}
 			if masked.SMTP.Password != "" {
 				masked.SMTP.Password = "********"
 			}
 			out := struct {
 				config.Profile
 				PasswordStorage     string `json:"passwordStorage"`
+				SecretStorage       string `json:"secretStorage,omitempty"`
 				SMTPPasswordStorage string `json:"smtpPasswordStorage,omitempty"`
-			}{masked, string(secrets.Where(p, secrets.WebUntis, a.noKeyring)), ""}
+			}{masked, string(secrets.Where(p, secrets.WebUntis, a.noKeyring)), string(secrets.Where(p, secrets.MobileSecret, a.noKeyring)), ""}
 			if p.SMTP.Username != "" {
 				out.SMTPPasswordStorage = string(secrets.Where(p, secrets.SMTP, a.noKeyring))
 			}
@@ -528,7 +698,7 @@ The SMTP password can also be provided via $WEBUNTIS_SMTP_PASSWORD.`,
 			var smtpPw string
 			switch {
 			case pwStdin:
-				if smtpPw, err = readStdinSecret(); err != nil {
+				if smtpPw, err = readStdinSecret("SMTP password: "); err != nil {
 					return err
 				}
 			case pwPrompt:
@@ -593,6 +763,7 @@ func (a *app) profilesCmd() *cobra.Command {
 				Server  string `json:"server" yaml:"server"`
 				School  string `json:"school" yaml:"school"`
 				User    string `json:"username" yaml:"username"`
+				Auth    string `json:"authMethod" yaml:"authMethod"`
 			}
 			var list []row
 			for _, n := range names {
@@ -600,19 +771,23 @@ func (a *app) profilesCmd() *cobra.Command {
 				if err != nil {
 					continue
 				}
-				list = append(list, row{n, n == cur, p.Server, p.School, p.Username})
+				list = append(list, row{n, n == cur, p.Server, p.School, p.Username, p.Method()})
 			}
 			return a.emit(list, func() string {
 				var rows [][]string
 				for _, r := range list {
-					rows = append(rows, []string{r.Name, render.Check(r.Current), r.School, r.Server, render.Esc(r.User)})
+					auth := "Passwort"
+					if r.Auth == config.AuthSecret {
+						auth = "Untis Mobile"
+					}
+					rows = append(rows, []string{r.Name, render.Check(r.Current), r.School, r.Server, render.Esc(r.User), auth})
 				}
 				var d render.Doc
 				d.H(2, "Profile")
 				if len(rows) == 0 {
 					return d.Empty("Keine Profile. `webuntis login` legt eines an.").String()
 				}
-				d.Table([]string{"Name", "Aktiv", "Schule", "Server", "Benutzer"}, rows)
+				d.Table([]string{"Name", "Aktiv", "Schule", "Server", "Benutzer", "Anmeldung"}, rows)
 				d.P("_Wechseln: `webuntis profiles use <name>` · einmalig: `--profile <name>`_")
 				return d.String()
 			}, nil)

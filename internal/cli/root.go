@@ -95,7 +95,7 @@ Get started:
 	pf.StringVarP(&a.student, "student", "s", "", "student name or id (for parent accounts with several children)")
 	pf.BoolVarP(&a.refresh, "refresh", "r", false, "bypass the local cache and fetch fresh data")
 	pf.BoolVar(&a.debug, "debug", false, "print HTTP requests to stderr")
-	pf.BoolVar(&a.noKeyring, "no-keyring", os.Getenv("WEBUNTIS_NO_KEYRING") != "", "do not use the system keyring; store passwords in the profile's config.json (mode 0600)")
+	pf.BoolVar(&a.noKeyring, "no-keyring", os.Getenv("WEBUNTIS_NO_KEYRING") != "", "do not use the system keyring; store passwords / the Untis Mobile key in the profile's config.json (mode 0600)")
 	pf.StringVar(&a.style, "style", os.Getenv("WEBUNTIS_STYLE"), "markdown style: auto, dark, light, notty, dracula, tokyo-night, pink, ascii or a glamour JSON file")
 
 	root.AddGroup(
@@ -147,7 +147,7 @@ func (a *app) api() (*webuntis.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := webuntis.New(p, webuntis.Options{NoCache: a.refresh, Debug: a.debug, Password: a.passwordFunc(p)})
+	c, err := webuntis.New(p, webuntis.Options{NoCache: a.refresh, Debug: a.debug, Password: a.secretFunc(p, secrets.WebUntis), Secret: a.secretFunc(p, secrets.MobileSecret)})
 	if err != nil {
 		return nil, err
 	}
@@ -226,16 +226,17 @@ func (a *app) schoolYearRange(ctx context.Context, c *webuntis.Client) (time.Tim
 	return dates.Day(y.DateRange.StartTime()), dates.Day(y.DateRange.EndTime())
 }
 
-// passwordFunc looks up the WebUntis password lazily (only when a login is
-// needed), so normal runs with a valid session never touch the keyring.
-func (a *app) passwordFunc(p *config.Profile) func() (string, error) {
+// secretFunc looks up the WebUntis password or Untis Mobile secret lazily
+// (only when a login is needed), so normal runs with a valid session never
+// touch the keyring.
+func (a *app) secretFunc(p *config.Profile, k secrets.Kind) func() (string, error) {
 	return func() (string, error) {
-		pw, src, err := secrets.Get(p, secrets.WebUntis, a.noKeyring)
+		pw, src, err := secrets.Get(p, k, a.noKeyring)
 		if errors.Is(err, secrets.ErrNotFound) {
 			return "", webuntis.ErrNoPassword
 		}
 		if err == nil && a.debug {
-			fmt.Fprintf(os.Stderr, "[debug] using WebUntis password from %s\n", src)
+			fmt.Fprintf(os.Stderr, "[debug] using WebUntis %s from %s\n", map[bool]string{true: "secret", false: "password"}[k == secrets.MobileSecret], src)
 		}
 		return pw, err
 	}

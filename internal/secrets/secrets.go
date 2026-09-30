@@ -1,8 +1,8 @@
 // Package secrets resolves and stores the passwords of a profile. By default
 // they live in the system keyring (service "webuntis-cli" for the WebUntis
-// password, "webuntis-cli-smtp" for the SMTP password, account = profile
-// name). With --no-keyring they are kept in the profile's config.json
-// (mode 0600) instead.
+// password, "webuntis-cli-secret" for the Untis Mobile key,
+// "webuntis-cli-smtp" for the SMTP password, account = profile name). With
+// --no-keyring they are kept in the profile's config.json (mode 0600) instead.
 package secrets
 
 import (
@@ -18,8 +18,9 @@ import (
 type Kind string
 
 const (
-	WebUntis Kind = "webuntis"
-	SMTP     Kind = "smtp"
+	WebUntis     Kind = "webuntis"
+	MobileSecret Kind = "secret" // Untis Mobile key (TOTP secret shown next to the QR code)
+	SMTP         Kind = "smtp"
 )
 
 // Storage locations.
@@ -40,23 +41,30 @@ const (
 
 // Stores are the keyring stores per kind; tests replace them.
 var Stores = map[Kind]keyring.Store{
-	WebUntis: keyring.System{},
-	SMTP:     keyring.System{ServiceName: keyring.Service + "-smtp"},
+	WebUntis:     keyring.System{},
+	MobileSecret: keyring.System{ServiceName: keyring.Service + "-secret"},
+	SMTP:         keyring.System{ServiceName: keyring.Service + "-smtp"},
 }
 
 // ErrNotFound reports that no secret is stored.
 var ErrNotFound = errors.New("no password stored")
 
 func envVar(k Kind) string {
-	if k == SMTP {
+	switch k {
+	case SMTP:
 		return "WEBUNTIS_SMTP_PASSWORD"
+	case MobileSecret:
+		return "WEBUNTIS_SECRET"
 	}
 	return "WEBUNTIS_PASSWORD"
 }
 
 func fileField(p *config.Profile, k Kind) *string {
-	if k == SMTP {
+	switch k {
+	case SMTP:
 		return &p.SMTP.Password
+	case MobileSecret:
+		return &p.Secret
 	}
 	return &p.Password
 }
@@ -133,7 +141,7 @@ func Delete(p *config.Profile, k Kind, noKeyring bool) error {
 // DeleteAll removes all secrets of the profile.
 func DeleteAll(p *config.Profile, noKeyring bool) error {
 	var errs []error
-	for _, k := range []Kind{WebUntis, SMTP} {
+	for _, k := range []Kind{WebUntis, MobileSecret, SMTP} {
 		errs = append(errs, Delete(p, k, noKeyring))
 	}
 	return errors.Join(errs...)
