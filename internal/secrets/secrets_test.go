@@ -17,6 +17,7 @@ func setup(t *testing.T) *config.Profile {
 	t.Cleanup(gokeyring.MockInit)
 	t.Setenv("WEBUNTIS_CLI_HOME", t.TempDir())
 	t.Setenv("WEBUNTIS_PASSWORD", "")
+	t.Setenv("WEBUNTIS_SECRET", "")
 	t.Setenv("WEBUNTIS_SMTP_PASSWORD", "")
 	return &config.Profile{Name: "default", Server: "s", School: "x", Username: "u"}
 }
@@ -81,14 +82,38 @@ func TestNoKeyringSkipsKeyringOnRead(t *testing.T) {
 	}
 }
 
+func TestMobileSecret(t *testing.T) {
+	p := setup(t)
+	if err := Set(p, MobileSecret, "KEY", false); err != nil {
+		t.Fatal(err)
+	}
+	if p.Secret != "" {
+		t.Fatalf("key must not be kept in the profile: %+v", p)
+	}
+	if v, err := gokeyring.Get(keyring.Service+"-secret", "default"); err != nil || v != "KEY" {
+		t.Fatalf("keyring entry = %q, %v", v, err)
+	}
+	if Where(p, WebUntis, false) != SourceNone {
+		t.Fatal("key must be separate from the password")
+	}
+	t.Setenv("WEBUNTIS_SECRET", "ENV")
+	if v, src, _ := Get(p, MobileSecret, false); v != "ENV" || src != SourceEnv {
+		t.Fatalf("Get = %q %s", v, src)
+	}
+	if err := Set(p, MobileSecret, "FILEKEY", true); err != nil || p.Secret != "FILEKEY" {
+		t.Fatalf("file storage: %v %+v", err, p)
+	}
+}
+
 func TestDeleteAll(t *testing.T) {
 	p := setup(t)
 	_ = Set(p, WebUntis, "a", false)
+	_ = Set(p, MobileSecret, "k", false)
 	_ = Set(p, SMTP, "b", false)
 	if err := DeleteAll(p, false); err != nil {
 		t.Fatal(err)
 	}
-	if Where(p, WebUntis, false) != SourceNone || Where(p, SMTP, false) != SourceNone {
+	if Where(p, WebUntis, false) != SourceNone || Where(p, MobileSecret, false) != SourceNone || Where(p, SMTP, false) != SourceNone {
 		t.Fatal("secrets left after DeleteAll")
 	}
 }

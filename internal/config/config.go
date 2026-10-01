@@ -45,15 +45,33 @@ type Profile struct {
 	TenantID          string `json:"tenantId,omitempty"`
 	SchoolDisplayName string `json:"schoolDisplayName,omitempty"`
 	Username          string `json:"username"`
-	// Password is only set when credentials are stored in this file
+	AuthMethod        string `json:"authMethod,omitempty"` // AuthPassword (default when empty) or AuthSecret
+	// Password and Secret (base32 Untis Mobile key, shown next to the QR code)
+	// are only set when credentials are stored in this file
 	// (CredentialStore "file", i.e. --no-keyring).
-	// Use package secrets to read or store passwords.
+	// Use package secrets to read or store them.
 	Password string `json:"password,omitempty"`
+	Secret   string `json:"secret,omitempty"`
 	// CredentialStore is "keyring" (default) or "file" (--no-keyring).
 	CredentialStore string     `json:"credentialStore,omitempty"`
 	Student         string     `json:"student,omitempty"`  // default student (name or id) for parent accounts
 	Timezone        string     `json:"timezone,omitempty"` // IANA name used for ics output, default: local
 	SMTP            SMTPConfig `json:"smtp,omitzero"`
+}
+
+// Authentication methods stored in Profile.AuthMethod.
+const (
+	AuthPassword = "password" // JSON-RPC authenticate with username + password (default)
+	AuthSecret   = "secret"   // Untis Mobile key (TOTP), works for Microsoft/SSO accounts
+)
+
+// Method returns the effective auth method (AuthPassword or AuthSecret).
+// Legacy profiles without AuthMethod use the password unless a secret is stored.
+func (p *Profile) Method() string {
+	if p.AuthMethod == AuthSecret || (p.AuthMethod == "" && p.Secret != "") {
+		return AuthSecret
+	}
+	return AuthPassword
 }
 
 // Cookie is a minimal persisted cookie.

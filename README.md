@@ -11,13 +11,24 @@ Read-only [WebUntis](https://webuntis.com) client for the terminal. Works with a
    go install github.com/dgrieser/web-untis-cli/cmd/webuntis@latest
    ```
 
-2. **Log in** – the wizard asks for profile, school (live search), username, password and default student:
+2. **Log in** – the wizard asks for profile, school (live search), login method, credentials and default student:
 
    ```sh
    webuntis setup
    ```
 
    Non-interactive: `echo "$PW" | webuntis login ge-huellhorst --user me@example.com --password-stdin`
+
+   **Microsoft / SSO accounts** (typically students) have no WebUntis password. Use the Untis Mobile key
+   instead: log in to WebUntis in the browser, open *Profil → Freigaben → "Zugriff über Untis Mobile" → Anzeigen*,
+   copy the key shown next to the QR code and pick "Microsoft / SSO" in the wizard, or:
+
+   ```sh
+   webuntis login -p kid1 ge-huellhorst -u max --secret          # prompts for the key
+   echo "$KEY" | webuntis login -p kid1 ge-huellhorst -u max --secret-stdin
+   ```
+
+   If the school hides "Zugriff über Untis Mobile" for students, the account cannot be used with this tool.
 
 3. **Shell completion** (optional): `source <(webuntis completion bash)` (also zsh, fish).
 
@@ -81,23 +92,25 @@ Everything lives in `~/.cache/webuntis-cli/<profile>/` (override with `$WEBUNTIS
 - `cache/`: response cache
 - `forwarded.json`, `news-seen.json`, `news-forwarded.json`: already sent and already seen items
 
-**Passwords** (WebUntis and SMTP) are kept in the system keyring: Secret Service on
-Linux, Keychain on macOS, Credential Manager on Windows. They are stored under
-the services `webuntis-cli` / `webuntis-cli-smtp` with the profile name as
-account, and only after the server accepted the password. The tool reads them
-only when the session has expired.
+**Passwords** (WebUntis and SMTP) and the Untis Mobile key are kept in the
+system keyring: Secret Service on Linux, Keychain on macOS, Credential Manager
+on Windows. They are stored under the services `webuntis-cli` /
+`webuntis-cli-secret` / `webuntis-cli-smtp` with the profile name as account,
+and only after the server accepted them. The tool reads them only when the
+session has expired.
 
-- `--no-keyring` / `$WEBUNTIS_NO_KEYRING=1` keeps passwords in `config.json`
-  (e.g. headless machines without Secret Service).
-- `--no-store-password` stores nothing; `$WEBUNTIS_PASSWORD` /
-  `$WEBUNTIS_SMTP_PASSWORD` override the stored passwords.
+
+- `--no-keyring` / `$WEBUNTIS_NO_KEYRING=1` keeps passwords and the Untis Mobile key in
+  `config.json` (e.g. headless machines without Secret Service).
+- `--no-store-password` stores nothing; `$WEBUNTIS_PASSWORD` / `$WEBUNTIS_SECRET` /
+  `$WEBUNTIS_SMTP_PASSWORD` override the stored credentials.
 - `logout --forget` removes the keyring entries.
 
 Environment variables: `WEBUNTIS_PROFILE`, `WEBUNTIS_OUTPUT`, `WEBUNTIS_STYLE`, `WEBUNTIS_FORM_THEME`, `WEBUNTIS_NO_KEYRING`.
 
 ## How it works
 
-There is no public API for end users. The official JSON-RPC API (`/WebUntis/jsonrpc.do`) is partner-documented and limited. This tool logs in via JSON-RPC and then uses the same JSON endpoints as the web UI:
+There is no public API for end users. The official JSON-RPC API (`/WebUntis/jsonrpc.do`) is partner-documented and limited. This tool logs in via JSON-RPC (`authenticate` with username + password; Microsoft/SSO accounts use the Untis Mobile app protocol instead: `jsonrpc_intern.do` `getUserData2017` with a TOTP derived from the Untis Mobile key, which yields the same session cookie) and then uses the same JSON endpoints as the web UI:
 
 - `/WebUntis/api/token/new`: returns a Bearer JWT used for `/api/rest/view/v1/*` (timetable, messages, app data).
 - `/api/classreg/*`, `/api/homeworks/lessons`, `/api/exams`, `/api/public/news|officehours/*`: these use the session cookie.

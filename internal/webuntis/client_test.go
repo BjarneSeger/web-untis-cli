@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,7 +22,7 @@ import (
 
 func fakeJWT(exp time.Time) string {
 	h := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256"}`))
-	p := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, exp.Unix())))
+	p := base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil, `{"exp":%d}`, exp.Unix()))
 	return h + "." + p + ".sig"
 }
 
@@ -67,8 +69,23 @@ var fixtures = map[string]string{
 type fakeServer struct {
 	*httptest.Server
 	logins     atomic.Int32
+	otpLogins  atomic.Int32
+	formLogins atomic.Int32
 	tokenCalls atomic.Int32
-	expireOnce atomic.Bool // next REST call answers 401 once
+	expireOnce atomic.Bool  // next REST call answers 401 once
+	rejectOTP  atomic.Int32 // reject that many valid OTP logins first
+}
+
+// otpValid accepts the code of the current step and its neighbours.
+func otpValid(code string) bool {
+	key, _ := decodeSecret(rfcKey)
+	now := time.Now()
+	for _, d := range []time.Duration{0, -totpStep, totpStep} {
+		if totp(key, now.Add(d)) == code {
+			return true
+		}
+	}
+	return false
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
@@ -94,6 +111,43 @@ func newFakeServer(t *testing.T) *fakeServer {
 		default:
 			_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","id":"1","result":null}`)
 		}
+	})
+	mux.HandleFunc("/WebUntis/jsonrpc_intern.do", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("m") != "getUserData2017" || q.Get("school") != "ge-huellhorst" || q.Get("v") == "" {
+			http.Error(w, "bad query", http.StatusBadRequest)
+			return
+		}
+		var req struct {
+			Method string `json:"method"`
+			Params []struct {
+				Auth struct {
+					User       string          `json:"user"`
+					OTP        json.RawMessage `json:"otp"`
+					ClientTime int64           `json:"clientTime"`
+				} `json:"auth"`
+			} `json:"params"`
+		}
+		if json.NewDecoder(r.Body).Decode(&req) != nil || req.Method != "getUserData2017" || len(req.Params) != 1 || req.Params[0].Auth.ClientTime == 0 {
+			http.Error(w, "bad params shape", http.StatusBadRequest)
+			return
+		}
+		code := strings.Trim(string(req.Params[0].Auth.OTP), `"`) // number or string
+		if n, err := strconv.Atoi(code); err == nil {
+			code = fmt.Sprintf("%06d", n)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if req.Params[0].Auth.User != "parent@example.com" || !otpValid(code) || fs.rejectOTP.Add(-1) >= 0 {
+			_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","id":"1","error":{"message":"bad credentials","code":-8504}}`)
+			return
+		}
+		fs.otpLogins.Add(1)
+		http.SetCookie(w, &http.Cookie{Name: "JSESSIONID", Value: "SESSION1", Path: "/WebUntis"})
+		_, _ = fmt.Fprint(w, `{"jsonrpc":"2.0","id":"1","result":{"masterData":{"timeStamp":1},"userData":{"displayName":"Kid Alpha","elemType":"STUDENT","elemId":8685},"settings":{}}}`)
+	})
+	mux.HandleFunc("/WebUntis/j_spring_security_check", func(w http.ResponseWriter, r *http.Request) {
+		fs.formLogins.Add(1)
+		http.Redirect(w, r, "/WebUntis/?school=ge-huellhorst#login_error", http.StatusFound)
 	})
 	mux.HandleFunc("/WebUntis/api/token/new", func(w http.ResponseWriter, r *http.Request) {
 		ck, err := r.Cookie("JSESSIONID")
@@ -138,9 +192,16 @@ func newFakeServer(t *testing.T) *fakeServer {
 }
 
 func newTestClient(t *testing.T, fs *fakeServer, password string) *Client {
+	return newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", Password: password})
+}
+
+// newTestClientProfile creates a client for p (Name/Server/School are filled in).
+func newTestClientProfile(t *testing.T, fs *fakeServer, p *config.Profile) *Client {
 	t.Setenv("WEBUNTIS_CLI_HOME", t.TempDir())
+	t.Setenv("WEBUNTIS_PASSWORD", "")
+	t.Setenv("WEBUNTIS_SECRET", "")
 	u, _ := url.Parse(fs.URL)
-	p := &config.Profile{Name: "test", Server: u.Host, School: "ge-huellhorst", Username: "parent@example.com", Password: password}
+	p.Name, p.Server, p.School = "test", u.Host, "ge-huellhorst"
 	if err := p.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +257,131 @@ func TestBadCredentials(t *testing.T) {
 	_, err := c.AppData(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "bad credentials") {
 		t.Fatalf("expected bad credentials error, got %v", err)
+	}
+}
+
+func TestSecretLogin(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: config.AuthSecret, Secret: rfcKey})
+	ctx := context.Background()
+	ad, err := c.AppData(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fs.otpLogins.Load() != 1 || fs.logins.Load() != 0 || fs.formLogins.Load() != 0 || fs.tokenCalls.Load() < 1 {
+		t.Fatalf("otp=%d pw=%d form=%d token=%d", fs.otpLogins.Load(), fs.logins.Load(), fs.formLogins.Load(), fs.tokenCalls.Load())
+	}
+	if ad.CurrentSchoolYear.Name != "2026/2027" || c.Profile.Password != "" {
+		t.Fatalf("unexpected app data / profile: %+v %+v", ad, c.Profile)
+	}
+	if _, err := c.LatestImportTime(ctx); err != nil {
+		t.Fatalf("json-rpc with otp session: %v", err)
+	}
+	if err := c.SaveSession(); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.Profile.LoadSession(); s.Token == "" || len(s.Cookies) == 0 {
+		t.Fatalf("session not persisted: %+v", s)
+	}
+}
+
+func TestSecretLoginBadKey(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: config.AuthSecret, Secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJR"})
+	_, err := c.AppData(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "bad credentials") {
+		t.Fatalf("expected bad credentials error, got %v", err)
+	}
+	if fs.otpLogins.Load() != 0 || fs.formLogins.Load() != 0 || fs.logins.Load() != 0 {
+		t.Fatalf("unexpected logins: otp=%d form=%d pw=%d", fs.otpLogins.Load(), fs.formLogins.Load(), fs.logins.Load())
+	}
+}
+
+func TestSecretLoginFromEnv(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com"})
+	t.Setenv("WEBUNTIS_SECRET", strings.ToLower(rfcKey))
+	if _, err := c.AppData(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fs.otpLogins.Load() != 1 || fs.logins.Load() != 0 {
+		t.Fatalf("expected otp login, otp=%d pw=%d", fs.otpLogins.Load(), fs.logins.Load())
+	}
+}
+
+func TestSecretLoginInvalidKey(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: config.AuthSecret, Secret: "NOT*BASE32"})
+	_, err := c.AppData(context.Background())
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "invalid Untis Mobile key") {
+		t.Fatalf("expected ErrAuth for invalid key, got %v", err)
+	}
+	if fs.otpLogins.Load() != 0 {
+		t.Fatal("no OTP login expected")
+	}
+}
+
+func TestSecretLoginRetryAtStepBoundary(t *testing.T) {
+	fs := newFakeServer(t)
+	fs.rejectOTP.Store(1)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: config.AuthSecret, Secret: rfcKey})
+	base, calls := time.Now(), 0
+	timeNow = func() time.Time { // the step changes after the first code
+		calls++
+		if calls == 1 {
+			return base
+		}
+		return base.Add(totpStep)
+	}
+	t.Cleanup(func() { timeNow = time.Now })
+	if _, err := c.AppData(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if fs.otpLogins.Load() != 1 || fs.rejectOTP.Load() >= 0 {
+		t.Fatalf("expected one rejected and one accepted OTP, otp=%d reject=%d", fs.otpLogins.Load(), fs.rejectOTP.Load())
+	}
+}
+
+func TestPasswordProfilesIgnoreEnvSecret(t *testing.T) {
+	for _, method := range []string{"", config.AuthPassword} { // legacy and explicit password profiles
+		fs := newFakeServer(t)
+		c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: method, Password: "secret"})
+		t.Setenv("WEBUNTIS_SECRET", rfcKey)
+		if _, err := c.AppData(context.Background()); err != nil {
+			t.Fatalf("method %q: %v", method, err)
+		}
+		if fs.logins.Load() != 1 || fs.otpLogins.Load() != 0 {
+			t.Fatalf("method %q: expected password login, pw=%d otp=%d", method, fs.logins.Load(), fs.otpLogins.Load())
+		}
+	}
+}
+
+func TestSecretLoginNoSecret(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: config.AuthSecret, Password: "secret"})
+	_, err := c.AppData(context.Background())
+	if !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "WEBUNTIS_SECRET") {
+		t.Fatalf("expected ErrAuth with hint, got %v", err)
+	}
+	if fs.logins.Load() != 0 {
+		t.Fatal("must not fall back to password login")
+	}
+}
+
+func TestSecretReloginOn401(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClientProfile(t, fs, &config.Profile{Username: "parent@example.com", AuthMethod: config.AuthSecret, Secret: rfcKey})
+	ctx := context.Background()
+	if _, err := c.News(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	fs.expireOnce.Store(true)
+	c.Cache = nil
+	if _, _, err := c.Inbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if fs.otpLogins.Load() != 2 {
+		t.Fatalf("expected re-login, otpLogins=%d", fs.otpLogins.Load())
 	}
 }
 
