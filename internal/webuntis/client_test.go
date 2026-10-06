@@ -54,6 +54,12 @@ var fixtures = map[string]string{
 		 {"ids":[3],"duration":{"start":"2026-09-21T09:40","end":"2026-09-21T10:25"},"type":"NORMAL_TEACHING_PERIOD","status":"CANCELLED","statusDetail":null,
 		  "position2":[{"current":{"type":"SUBJECT","status":"REGULAR","shortName":"M","longName":"MATHE","displayName":"M"},"removed":null}]}
 		],"backEntries":[]}],"errors":[]}`,
+	"/WebUntis/api/rest/view/v2/calendar-entry/detail": `{"calendarEntries":[
+		{"id":1,"startDateTime":"2026-09-21T07:45","endDateTime":"2026-09-21T09:20","teachingContent":"Gedichtanalyse","notesAll":"Buch mitbringen","notesStaff":null,
+		 "homeworks":[{"id":7,"text":"Gedicht S. 12 lesen","remark":"","dateTime":"2026-09-21T07:45","dueDateTime":"2026-09-23T07:45","completed":false}]},
+		{"id":2,"startDateTime":"2026-09-21T09:40","endDateTime":"2026-09-21T10:25","teachingContent":" Unit 3 ","notesAll":null,"homeworks":[]},
+		{"id":99,"startDateTime":"2026-09-21T09:40","endDateTime":"2026-09-21T10:25","teachingContent":"fremde Stunde","notesAll":"fremd","homeworks":[]}
+		],"referencedCalendarEntries":[]}`,
 	"/WebUntis/api/homeworks/lessons": `{"data":{"records":[{"homeworkId":1,"teacherId":172,"elementIds":[8685]},{"homeworkId":2,"teacherId":172,"elementIds":[9000]}],
 		"homeworks":[{"id":1,"lessonId":10,"date":20260915,"dueDate":20260922,"text":"vocabulary p. 241","remark":"","completed":true,"attachments":[]},
 		             {"id":2,"lessonId":10,"date":20260915,"dueDate":20260923,"text":"other kid","remark":"","completed":false,"attachments":[]}],
@@ -444,6 +450,38 @@ func TestTimetableNormalization(t *testing.T) {
 	}
 	if !l[2].Cancelled() || l[2].Changed() {
 		t.Fatalf("lesson 2 should be cancelled: %+v", l[2])
+	}
+}
+
+func TestLessonDetails(t *testing.T) {
+	fs := newFakeServer(t)
+	c := newTestClient(t, fs, "secret")
+	ctx := context.Background()
+	day := time.Date(2026, 9, 21, 0, 0, 0, 0, time.Local)
+	tt, err := c.Timetable(ctx, TimetableQuery{ResourceType: "STUDENT", ResourceID: 8685, TimetableType: "MY_TIMETABLE", Start: day, End: day})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AddLessonDetails(ctx, tt); err != nil {
+		t.Fatal(err)
+	}
+	l := tt.Days[0].Lessons
+	if l[0].TeachingContent != "Gedichtanalyse" || l[0].Notes != "Buch mitbringen" {
+		t.Fatalf("lesson 0 details: %+v", l[0])
+	}
+	if len(l[0].Homework) != 1 || l[0].Homework[0].Text != "Gedicht S. 12 lesen" || l[0].Homework[0].Subject != "D" ||
+		!l[0].Homework[0].DueDate.Equal(time.Date(2026, 9, 23, 7, 45, 0, 0, time.Local)) {
+		t.Fatalf("lesson 0 homework: %+v", l[0].Homework)
+	}
+	if l[1].TeachingContent != "Unit 3" || l[1].Notes != "" || len(l[1].Homework) != 0 {
+		t.Fatalf("lesson 1 details: %+v", l[1])
+	}
+	if l[2].TeachingContent != "" || l[2].Notes != "" {
+		t.Fatalf("lesson 2 must not get details of other periods: %+v", l[2])
+	}
+	b, err := json.Marshal(l[0])
+	if err != nil || !strings.Contains(string(b), `"teachingContent":"Gedichtanalyse"`) || !strings.Contains(string(b), `"homework":[`) {
+		t.Fatalf("json: %v %s", err, b)
 	}
 }
 

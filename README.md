@@ -43,7 +43,7 @@ Read-only [WebUntis](https://webuntis.com) client for the terminal. Works with a
 | `news forward` | E-mails each news item once via SMTP |
 | `messages [inbox\|sent\|drafts]` | Mitteilungen; `show ID`, `attachments ID`, `--search`, `--unread` |
 | `messages forward` | E-mails messages (with attachments + history) via SMTP |
-| `timetable [DATE]` | Student timetable as week grid; `--class [NAME]`, `--day`, `--days N`, `--list`, `--regular`, `-o html\|pdf` |
+| `timetable [DATE]` | Student timetable as week grid; `--class [NAME]`, `--day`, `--days N`, `--list`, `--regular`, `-o html\|pdf`; `-o json\|yaml` include the teachers' lesson notes (Lehrstoff, Notizen, homework), `--no-notes` skips them |
 | `absences` | Reported absences; `--open` for unexcused |
 | `absence-times` | Fehlzeiten with totals per subject |
 | `homework [--open]` | Homework by due date |

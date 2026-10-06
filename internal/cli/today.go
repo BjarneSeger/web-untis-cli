@@ -177,7 +177,7 @@ const ownClass = "@own"
 
 func (a *app) timetableCmd() *cobra.Command {
 	var date, class, resType, resName, outFile, pdfEngine string
-	var day, grid, list, next, regular bool
+	var day, grid, list, next, regular, noNotes bool
 	var days int
 	cmd := &cobra.Command{
 		Use:     "timetable [DATE]",
@@ -199,7 +199,11 @@ on one A4 landscape page). -o pdf writes the same layout as PDF to --file,
 to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
   auto     headless Chrome/Chromium/Edge if installed, else native (default)
   browser  print the HTML page with the browser ($WEBUNTIS_BROWSER selects one)
-  native   built-in renderer, needs no browser (servers, cron)`,
+  native   built-in renderer, needs no browser (servers, cron)
+
+-o json/yaml include the teaching content (Lehrstoff), notes and homework
+the teachers entered for each lesson (one extra request per lesson, cached;
+skip with --no-notes).`,
 		Example: `  webuntis timetable
   webuntis tt next-week
   webuntis tt --day tomorrow
@@ -268,6 +272,12 @@ to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
 			if err != nil {
 				return err
 			}
+			// --regular drops the week's notes, so don't fetch them.
+			if (a.format == render.JSON || a.format == render.YAML) && !noNotes && !regular {
+				if err := c.AddLessonDetails(ctx, tt); err != nil {
+					fmt.Fprintln(os.Stderr, "Warning: lesson notes unavailable:", err)
+				}
+			}
 			if q.ResourceType == "STUDENT" {
 				// The API only returns the surname; use the full student name.
 				tt.Resource.LongName = firstNonEmpty(name, tt.Resource.LongName, tt.Resource.DisplayName, tt.Resource.ShortName)
@@ -308,6 +318,7 @@ to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
 	f.StringVarP(&outFile, "file", "O", "", "write html/pdf output to this file")
 	f.StringVar(&pdfEngine, "pdf-engine", envOr("WEBUNTIS_PDF_ENGINE", "auto"), "pdf renderer: auto, browser or native (no browser needed)")
 	_ = cmd.RegisterFlagCompletionFunc("pdf-engine", staticCompletion("auto", "browser", "native"))
+	f.BoolVar(&noNotes, "no-notes", false, "json/yaml: do not fetch the teachers' notes (Lehrstoff, Notizen, homework) per lesson")
 	return cmd
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +77,24 @@ type ttEntry struct {
 	Link             any          `json:"link"`
 }
 
+// calEntry is one period of /api/rest/view/v2/calendar-entry/detail, the
+// lesson details dialog of the web UI (what the teacher entered).
+type calEntry struct {
+	ID              int           `json:"id"`
+	TeachingContent string        `json:"teachingContent"`
+	NotesAll        string        `json:"notesAll"`
+	Homeworks       []calHomework `json:"homeworks"`
+}
+
+type calHomework struct {
+	ID          int    `json:"id"`
+	Text        string `json:"text"`
+	Remark      string `json:"remark"`
+	DateTime    string `json:"dateTime"`
+	DueDateTime string `json:"dueDateTime"`
+	Completed   bool   `json:"completed"`
+}
+
 type ttDay struct {
 	Date         string    `json:"date"`
 	ResourceType string    `json:"resourceType"`
@@ -113,6 +132,8 @@ type Lesson struct {
 	LessonInfo       string     `json:"lessonInfo,omitempty" yaml:"lessonInfo,omitempty"`
 	SubstitutionText string     `json:"substitutionText,omitempty" yaml:"substitutionText,omitempty"`
 	Notes            string     `json:"notes,omitempty" yaml:"notes,omitempty"`
+	TeachingContent  string     `json:"teachingContent,omitempty" yaml:"teachingContent,omitempty"` // Lehrstoff, see AddLessonDetails
+	Homework         []Homework `json:"homework,omitempty" yaml:"homework,omitempty"`               // from the lesson details, see AddLessonDetails
 	MovedFrom        *time.Time `json:"movedFrom,omitempty" yaml:"movedFrom,omitempty"`
 	Color            string     `json:"color,omitempty" yaml:"color,omitempty"`
 	AllDay           bool       `json:"allDay,omitempty" yaml:"allDay,omitempty"`
@@ -452,6 +473,98 @@ func (c *Client) Timetable(ctx context.Context, tq TimetableQuery) (*Timetable, 
 		tt.Days = append(tt.Days, td)
 	}
 	return tt, nil
+}
+
+// elementTypes maps resource types to the numeric element types of the
+// calendar-entry API.
+var elementTypes = map[string]int{"CLASS": 1, "TEACHER": 2, "SUBJECT": 3, "ROOM": 4, "STUDENT": 5}
+
+// AddLessonDetails fetches the lesson details (teaching content, notes and
+// homework entered by the teacher) of every lesson in tt and merges them into
+// the lessons. It costs one request per lesson block.
+func (c *Client) AddLessonDetails(ctx context.Context, tt *Timetable) error {
+	et, ok := elementTypes[tt.ResourceType]
+	if !ok || tt.Resource.ID == 0 {
+		return nil
+	}
+	fetched := map[[2]time.Time][]calEntry{}
+	for di := range tt.Days {
+		for li := range tt.Days[di].Lessons {
+			l := &tt.Days[di].Lessons[li]
+			if l.AllDay || l.Start.IsZero() {
+				continue
+			}
+			key := [2]time.Time{l.Start, l.End}
+			entries, ok := fetched[key]
+			if !ok {
+				var err error
+				if entries, err = c.calendarEntries(ctx, et, tt.Resource.ID, l.Start, l.End); err != nil {
+					return fmt.Errorf("lesson %s: %w", l.Start.Format("02.01. 15:04"), err)
+				}
+				fetched[key] = entries
+			}
+			mergeDetails(l, entries)
+		}
+	}
+	return nil
+}
+
+func (c *Client) calendarEntries(ctx context.Context, elementType, elementID int, start, end time.Time) ([]calEntry, error) {
+	q := url.Values{
+		"elementId":      {strconv.Itoa(elementID)},
+		"elementType":    {strconv.Itoa(elementType)},
+		"startDateTime":  {start.Format("2006-01-02T15:04:05")},
+		"endDateTime":    {end.Format("2006-01-02T15:04:05")},
+		"homeworkOption": {"DUE"},
+	}
+	var r struct {
+		CalendarEntries []calEntry `json:"calendarEntries"`
+	}
+	if err := c.GetJSON(ctx, "/WebUntis/api/rest/view/v2/calendar-entry/detail", q, ttlFor(end, 5*time.Minute), &r); err != nil {
+		return nil, err
+	}
+	return r.CalendarEntries, nil
+}
+
+// mergeDetails adds the details of the periods of l (a block may span several
+// periods) to l. Texts repeated across periods are only added once.
+func mergeDetails(l *Lesson, entries []calEntry) {
+	ids := map[int]bool{}
+	for _, id := range l.IDs {
+		ids[id] = true
+	}
+	add := func(parts []string, s string) []string {
+		s = strings.TrimSpace(s)
+		if s == "" || slices.Contains(parts, s) {
+			return parts
+		}
+		return append(parts, s)
+	}
+	content := add(nil, l.TeachingContent)
+	notes := add(nil, l.Notes)
+	seenHW := map[int]bool{}
+	for _, h := range l.Homework {
+		seenHW[h.ID] = true
+	}
+	for _, e := range entries {
+		if len(ids) > 0 && !ids[e.ID] {
+			continue
+		}
+		content = add(content, e.TeachingContent)
+		notes = add(notes, e.NotesAll)
+		for _, h := range e.Homeworks {
+			if seenHW[h.ID] || strings.TrimSpace(h.Text) == "" {
+				continue
+			}
+			seenHW[h.ID] = true
+			date, _ := dates.ParseLocalDateTime(h.DateTime)
+			due, _ := dates.ParseLocalDateTime(h.DueDateTime)
+			l.Homework = append(l.Homework, Homework{ID: h.ID, Date: date, DueDate: due, Subject: l.SubjectLabel(),
+				Text: h.Text, Remark: h.Remark, Completed: h.Completed})
+		}
+	}
+	l.TeachingContent = strings.Join(content, "\n")
+	l.Notes = strings.Join(notes, "\n")
 }
 
 func normalizeEntry(e ttEntry) Lesson {
