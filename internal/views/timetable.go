@@ -87,6 +87,13 @@ func ttTitle(tt *webuntis.Timetable) string {
 }
 
 func rangeLabel(tt *webuntis.Timetable) string {
+	if tt.Regular {
+		return dateRangeLabel(tt) + " · Regelstundenplan (ohne Änderungen)"
+	}
+	return dateRangeLabel(tt)
+}
+
+func dateRangeLabel(tt *webuntis.Timetable) string {
 	if dates.Day(tt.Start).Equal(dates.Day(tt.End)) {
 		return dates.WeekdayLong(tt.Start) + ", " + tt.Start.Format("02.01.2006")
 	}
@@ -264,7 +271,9 @@ func TimetableGridMD(tt *webuntis.Timetable, name string) string {
 	}
 	d.Table(headers, rows)
 	d.Raw(allDayNotes(days))
-	d.P("_**fett** = Änderung · ~~durchgestrichen~~ = Entfall_")
+	if !tt.Regular {
+		d.P("_**fett** = Änderung · ~~durchgestrichen~~ = Entfall_")
+	}
 	return d.String()
 }
 
@@ -384,6 +393,9 @@ func TimetableGridPretty(tt *webuntis.Timetable, name string, color bool, width 
 	legend := "  " + changed.Render("geändert") + " · " + cancelled.Render("Entfall")
 	if !color {
 		legend = "  * = geändert · ✗ = Entfall"
+	}
+	if tt.Regular {
+		legend = ""
 	}
 	out.WriteString(legend + "\n\n")
 	return out.String()

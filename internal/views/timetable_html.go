@@ -27,6 +27,7 @@ type htmlPage struct {
 	Title     string
 	Subtitle  string
 	Generated string
+	Regular   bool // no changes: hide their legend
 	Grid      *htmlGrid
 	Days      []htmlDay
 	Empty     bool
@@ -113,6 +114,7 @@ func buildPage(tt *webuntis.Timetable, name string, grid bool) htmlPage {
 	p := htmlPage{
 		Title:     strings.TrimPrefix(ttTitle(tt), "📅 "),
 		Subtitle:  rangeLabel(tt),
+		Regular:   tt.Regular,
 		Generated: "Stand: " + dates.WeekdayLong(time.Now()) + ", " + time.Now().Format("02.01.2006 15:04"),
 	}
 	if name != "" {

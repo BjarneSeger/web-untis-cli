@@ -177,7 +177,7 @@ const ownClass = "@own"
 
 func (a *app) timetableCmd() *cobra.Command {
 	var date, class, resType, resName, outFile, pdfEngine string
-	var day, grid, list, next bool
+	var day, grid, list, next, regular bool
 	var days int
 	cmd := &cobra.Command{
 		Use:     "timetable [DATE]",
@@ -189,6 +189,9 @@ the week of DATE (weekends jump to the next week).
 DATE accepts 2026-09-21, 21.09., today, tomorrow, monday, +1w, next-week…
 
 Pretty output is a colored week grid; --list shows one table per day.
+--regular shows the regular timetable (Regelstundenplan) without changes:
+cancelled lessons take place, substitute teachers and rooms are replaced
+by the original ones, additional lessons, exams and events are left out.
 Use -o ics to export as calendar (e.g. for subscriptions via cron).
 
 -o html writes a standalone page for the browser or printing (a week fits
@@ -203,6 +206,7 @@ to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
   webuntis tt --class              # timetable of the student's class
   webuntis tt --class 6c --list
   webuntis tt --days 28 -o ics > stundenplan.ics
+  webuntis tt --regular -o pdf     # regular timetable without changes
   webuntis tt -o html > stundenplan.html
   webuntis tt next-week -o pdf --file stundenplan.pdf`,
 		Args: cobra.MaximumNArgs(1),
@@ -269,6 +273,9 @@ to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
 				tt.Resource.LongName = firstNonEmpty(name, tt.Resource.LongName, tt.Resource.DisplayName, tt.Resource.ShortName)
 				name = ""
 			}
+			if regular {
+				tt = tt.WithoutChanges()
+			}
 			useGrid := !list && !day && (grid || end.Sub(start) <= 7*24*time.Hour)
 			cal := func() *ics.Calendar { return views.TimetableICS(tt, c.Profile.School) }
 			if a.format == render.HTMLPage || a.format == render.PDF {
@@ -293,6 +300,7 @@ to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
 	f.BoolVarP(&next, "next", "n", false, "show the following week")
 	f.BoolVarP(&grid, "grid", "g", false, "force grid view")
 	f.BoolVarP(&list, "list", "l", false, "list view (one table per day)")
+	f.BoolVar(&regular, "regular", false, "regular timetable without changes (no cancellations, substitutions, extra lessons)")
 	f.StringVarP(&class, "class", "c", "", "show a class timetable (default: the student's class)")
 	f.Lookup("class").NoOptDefVal = ownClass
 	f.StringVar(&resType, "resource-type", "", "other timetable type: TEACHER, ROOM, SUBJECT, STUDENT (if permitted)")

@@ -214,3 +214,30 @@ func TestTimetablePDF(t *testing.T) {
 		}
 	}
 }
+
+func TestTimetableRegular(t *testing.T) {
+	tt := fullWeek().WithoutChanges()
+	page, err := TimetableHTML(tt, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{`class="lesson cancelled"`, `class="lesson changed"`, `class="lesson exam"`, "Wandertag", "<ins>", "Änderung</span>"} {
+		if strings.Contains(page, bad) {
+			t.Errorf("regular timetable contains %q", bad)
+		}
+	}
+	if !strings.Contains(page, "Regelstundenplan") || !strings.Contains(TimetableGridMD(tt, ""), "Regelstundenplan") {
+		t.Error("regular timetable not labeled")
+	}
+	if strings.Contains(TimetableGridMD(tt, ""), "= Änderung") {
+		t.Error("markdown legend shown for regular timetable")
+	}
+	b, err := TimetablePDF(tt, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dir := os.Getenv("HTML_OUT"); dir != "" {
+		_ = os.WriteFile(dir+"/regular.pdf", b, 0o644)
+		_ = os.WriteFile(dir+"/regular.html", []byte(page), 0o644)
+	}
+}

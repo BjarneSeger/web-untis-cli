@@ -297,9 +297,11 @@ td.info { color: #475467; font-size: 12px; }
   </div>
   </div>
   <footer>
+    {{- if not $.Regular}}
     <span class="key"><span class="swatch changed"></span>Änderung</span>
     <span class="key"><span class="swatch cancelled"></span>Entfall</span>
     <span class="key"><span class="swatch exam"></span>Prüfung</span>
+    {{- end}}
     <span class="key"><span class="swatch today"></span>Heute</span>
     <span class="brand">webuntis-cli</span>
   </footer>
@@ -328,7 +330,7 @@ td.info { color: #475467; font-size: 12px; }
     {{- end}}
   </section>
   {{- end}}
-  <footer><span class="key"><span class="swatch changed"></span>Änderung</span><span class="key"><span class="swatch cancelled"></span>Entfall</span><span class="brand">webuntis-cli</span></footer>
+  <footer>{{if not .Regular}}<span class="key"><span class="swatch changed"></span>Änderung</span><span class="key"><span class="swatch cancelled"></span>Entfall</span>{{end}}<span class="brand">webuntis-cli</span></footer>
 {{- end}}
 </main>
 </body>

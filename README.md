@@ -43,7 +43,7 @@ Read-only [WebUntis](https://webuntis.com) client for the terminal. Works with a
 | `news forward` | E-mails each news item once via SMTP |
 | `messages [inbox\|sent\|drafts]` | Mitteilungen; `show ID`, `attachments ID`, `--search`, `--unread` |
 | `messages forward` | E-mails messages (with attachments + history) via SMTP |
-| `timetable [DATE]` | Student timetable as week grid; `--class [NAME]`, `--day`, `--days N`, `--list`, `-o html\|pdf` |
+| `timetable [DATE]` | Student timetable as week grid; `--class [NAME]`, `--day`, `--days N`, `--list`, `--regular`, `-o html\|pdf` |
 | `absences` | Reported absences; `--open` for unexcused |
 | `absence-times` | Fehlzeiten with totals per subject |
 | `homework [--open]` | Homework by due date |
@@ -77,6 +77,10 @@ otherwise a built-in renderer that needs no browser, so it also works on headles
 webuntis tt -o html > stundenplan.html
 webuntis tt next-week -o pdf --file stundenplan.pdf   # without --file: stdout when piped, else stundenplan-<date>.pdf
 ```
+
+`--regular` shows the regular timetable (Regelstundenplan) without changes: cancelled lessons take place,
+substitute teachers and rooms are replaced by the original ones, and additional lessons, exams and events
+are left out. It works with every output format, e.g. `webuntis tt --regular -o pdf` for a plan to put on the wall.
 
 **Dates:** `2026-09-21`, `21.09.`, `today`, `morgen`, `monday`, `+1w`, `next-week`.
 

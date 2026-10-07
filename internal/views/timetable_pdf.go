@@ -488,7 +488,11 @@ func (d *pdfDoc) gridPage(p htmlPage) {
 	g := p.Grid
 	legendPt := 7.5
 	legendTop := d.h - d.m - lineH(legendPt, 1.4)
-	d.legend(legendTop, legendPt, []string{"Änderung", "Entfall", "Prüfung", "Heute"})
+	keys := []string{"Änderung", "Entfall", "Prüfung", "Heute"}
+	if p.Regular {
+		keys = []string{"Heute"}
+	}
+	d.legend(legendTop, legendPt, keys)
 
 	base := 13 * printScale(len(g.Slots))
 	x0, y0 := d.m, top
@@ -788,7 +792,11 @@ func (d *pdfDoc) listPages(p htmlPage) {
 		y += 5
 	}
 	if y+lineH(7.5, 1.4) <= bottom {
-		d.legend(y, 7.5, []string{"Änderung", "Entfall"})
+		keys := []string{"Änderung", "Entfall"}
+		if p.Regular {
+			keys = nil
+		}
+		d.legend(y, 7.5, keys)
 	}
 }
 
