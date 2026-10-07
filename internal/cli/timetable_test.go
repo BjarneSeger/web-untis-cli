@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,9 +11,9 @@ import (
 )
 
 func TestTimetablePDFEngine(t *testing.T) {
-	t.Setenv("PATH", t.TempDir()) // no browser installed
-	t.Setenv("WEBUNTIS_BROWSER", "")
-	t.Setenv("CHROME_PATH", "")
+	// A configured but missing browser: FindBrowser fails even on machines
+	// with Chrome installed (e.g. CI runners).
+	t.Setenv("WEBUNTIS_BROWSER", filepath.Join(t.TempDir(), "no-such-browser"))
 	mon := time.Date(2026, 9, 21, 0, 0, 0, 0, time.Local)
 	tt := &webuntis.Timetable{ResourceType: "CLASS", Resource: webuntis.Resource{ShortName: "6c"}, Start: mon, End: mon.AddDate(0, 0, 4),
 		Days: []webuntis.TimetableDay{{Date: mon, Lessons: []webuntis.Lesson{{Start: mon.Add(8 * time.Hour), End: mon.Add(9 * time.Hour), Subjects: []webuntis.Element{{Name: "D"}}}}}}}
