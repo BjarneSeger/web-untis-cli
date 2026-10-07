@@ -19,7 +19,7 @@
   --changed-bg: #fff7e6;
   --cancelled: #d92d20;
   --exam: #7a3ee8;
-  --row-min: 3.9em;
+  --row-min: 4.6em;
   color-scheme: light;
 }
 * { box-sizing: border-box; }
@@ -56,6 +56,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
 /* ---------------------------------------------------------------- week grid */
 .grid {
   display: grid;
+  font-size: 16px;
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
@@ -68,11 +69,11 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
   border-bottom: 1px solid var(--line);
   border-left: 1px solid var(--line);
 }
-.dayhead .wd { font-weight: 700; font-size: 13.5px; }
-.dayhead .dt { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.dayhead .wd { font-weight: 700; font-size: 1em; }
+.dayhead .dt { color: var(--muted); font-size: .88em; margin-left: 4px; }
 .dayhead.today { background: var(--today); box-shadow: inset 0 3px 0 var(--today-ink); }
 .dayhead.today .wd, .dayhead.today .dt { color: var(--today-ink); }
-.dayhead .status { display: block; color: var(--muted); font-size: 11px; font-style: italic; }
+.dayhead .status { display: block; color: var(--muted); font-size: .8em; font-style: italic; }
 .corner { grid-row: 1; grid-column: 1; background: var(--head); border-bottom: 1px solid var(--line); }
 .chip {
   display: block;
@@ -81,7 +82,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
   border-radius: 5px;
   background: var(--bg);
   border-left: 3px solid var(--accent);
-  font-size: 11px;
+  font-size: .8em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -96,8 +97,8 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
   background: var(--head);
   line-height: 1.15;
 }
-.period .no { font-weight: 700; font-size: 14px; }
-.period .tm { color: var(--muted); font-size: 10.5px; }
+.period .no { font-weight: 700; font-size: 1.05em; }
+.period .tm { color: var(--muted); font-size: .74em; }
 .cell { border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
 .cell.today { background: var(--today); }
 .block {
@@ -117,14 +118,34 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
   border-left: 4px solid var(--accent);
   min-width: 0;
 }
-.lesson .top { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; }
-.lesson .subj { flex: 1 1 auto; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lesson .room { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lesson .meta { font-size: 12px; color: #3d4556; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lesson .long { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lesson .subj {
+  font-weight: 700;
+  font-size: 1.12em;
+  line-height: 1.15;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.lesson .meta {
+  margin-top: .15em;
+  font-size: .9em;
+  color: #3d4556;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.lesson .meta > span { white-space: nowrap; }
+.block.multi .lesson { font-size: .86em; padding-left: 7px; padding-right: 5px; }
+.block.multi .subj { -webkit-line-clamp: 3; }
+.lesson .room { font-weight: 700; color: var(--ink); }
 .lesson .info {
-  margin-top: 1px;
-  font-size: 10.5px;
+  margin-top: .2em;
+  font-size: .78em;
   color: #475467;
   overflow: hidden;
   display: -webkit-box;
@@ -135,7 +156,7 @@ h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
   display: inline-block;
   padding: 0 5px;
   border-radius: 4px;
-  font-size: 10px;
+  font-size: .68em;
   font-weight: 700;
   letter-spacing: .02em;
   text-transform: uppercase;
@@ -188,7 +209,7 @@ td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: top; 
 tbody tr:first-child td { border-top: 0; }
 td.time { white-space: nowrap; color: var(--muted); }
 td.subj { border-left: 4px solid var(--accent); background: var(--bg); }
-td.subj b { font-size: 14px; }
+td.subj b { font-size: 15px; }
 td.subj .long { display: block; font-size: 11px; color: var(--muted); }
 tr.cancelled td { color: var(--muted); }
 tr.cancelled td.subj { border-left-color: var(--cancelled); background: #f4f4f5; }
@@ -215,27 +236,18 @@ td.info { color: #475467; font-size: 12px; }
   .page { max-width: none; margin: 0; padding: 0; border-radius: 0; box-shadow: none; }
   .grid-page .page { height: 193mm; display: flex; flex-direction: column; overflow: hidden; }
   .grid-page .grid-wrap { flex: 1 1 auto; min-height: 0; display: flex; }
-  .grid-page .grid { flex: 1 1 auto; --row-min: 0; }
+  .grid-page .grid { flex: 1 1 auto; --row-min: 0; min-width: 0; font-size: calc(var(--scale, 1) * 13pt); }
   header { padding-bottom: 2.5mm; margin-bottom: 3mm; }
   h1 { font-size: 15pt; }
   .sub { font-size: 10pt; }
   .stamp { font-size: 7.5pt; }
   .dayhead { padding: 1.5mm 2.5mm; }
-  .dayhead .wd { font-size: 10pt; }
-  .dayhead .dt { font-size: 9pt; }
-  .chip { font-size: 7.5pt; }
-  .period .no { font-size: 10pt; }
-  .period .tm { font-size: 7pt; }
   .block { padding: 0.6mm; gap: 0.6mm; }
   .lesson { padding: 0.8mm 1.6mm 0.8mm 2mm; border-left-width: 1mm; border-radius: 1.2mm; }
-  .lesson .subj { font-size: 10pt; }
-  .lesson .room, .lesson .meta { font-size: 8pt; }
-  .lesson .long { font-size: 7pt; }
-  .lesson .info { font-size: 7pt; -webkit-line-clamp: 1; }
-  .badge { font-size: 6.5pt; padding: 0 1mm; }
+  .badge { padding: 0 1mm; }
   footer { margin-top: 2mm; font-size: 7.5pt; }
   td, th { padding: 1.6mm 2.4mm; }
-  td.subj b { font-size: 10.5pt; }
+  td.subj b { font-size: 11pt; }
   td.info { font-size: 8.5pt; }
   section.day { margin-bottom: 5mm; }
   section.day h2 { font-size: 12pt; margin-bottom: 2mm; }
@@ -255,13 +267,13 @@ td.info { color: #475467; font-size: 12px; }
   <p class="empty">Keine Einträge.</p>
 {{- else if .Grid}}{{with .Grid}}
   <div class="grid-wrap">
-  <div class="grid" style="grid-template-columns: {{.Columns}}; grid-template-rows: {{.Rows}};">
+  <div class="grid" style="grid-template-columns: {{.Columns}}; grid-template-rows: {{.Rows}}; --scale: {{.Scale}};">
     <div class="corner"></div>
     {{- range $i, $c := .Cols}}
     <div class="dayhead{{if $c.Today}} today{{end}}" style="grid-column: {{add $i 2}};">
       <span class="wd">{{$c.Weekday}}</span><span class="dt">{{$c.Date}}</span>
       {{- if $c.Status}}<span class="status">{{$c.Status}}</span>{{end}}
-      {{- range $c.AllDay}}<span class="chip" style="{{.Style}}" title="{{.Subject}}{{if .Info}} · {{.Info}}{{end}}">{{.Subject}}{{if .Info}} · {{.Info}}{{end}}</span>{{end}}
+      {{- range $c.AllDay}}<span class="chip" style="{{.Style}}" title="{{.Name}}{{if .Info}} · {{.Info}}{{end}}">{{.Name}}{{if .Info}} · {{.Info}}{{end}}</span>{{end}}
     </div>
     {{- end}}
     {{- range .Slots}}
@@ -271,11 +283,11 @@ td.info { color: #475467; font-size: 12px; }
     <div class="cell{{if .Today}} today{{end}}" style="grid-row: {{.Row}}; grid-column: {{.Col}};"></div>
     {{- end}}
     {{- range .Blocks}}
-    <div class="block" style="grid-row: {{.RowStart}} / {{.RowEnd}}; grid-column: {{.Col}}; grid-template-rows: repeat({{.Rows}}, minmax(0, 1fr)); grid-template-columns: repeat({{.Lanes}}, minmax(0, 1fr));">
+    <div class="block{{if gt .Lanes 1}} multi{{end}}" style="grid-row: {{.RowStart}} / {{.RowEnd}}; grid-column: {{.Col}}; grid-template-rows: repeat({{.Rows}}, minmax(0, 1fr)); grid-template-columns: repeat({{.Lanes}}, minmax(0, 1fr));">
       {{- range .Lessons}}
-      <div class="lesson {{.Kind}}" style="{{.Style}}; grid-row: {{.Row}} / {{.RowEnd}}; grid-column: {{.Lane}};" title="{{.Time}} {{.Subject}}{{if .SubjectLong}} ({{.SubjectLong}}){{end}}{{if .Info}} · {{.Info}}{{end}}">
-        <div class="top"><span class="subj">{{.Subject}}</span>{{if .Room}}<span class="room">{{.Room}}</span>{{end}}</div>
-        {{- if .Teacher}}<div class="meta">{{.Teacher}}</div>{{end}}
+      <div class="lesson {{.Kind}}" style="{{.Style}}; grid-row: {{.Row}} / {{.RowEnd}}; grid-column: {{.Lane}};" title="{{.Time}} {{.Name}}{{if .SubjectLong}} ({{.Subject}}){{end}}{{if .Info}} · {{.Info}}{{end}}">
+        <div class="subj">{{.Name}}</div>
+        {{- if or .Room .Teacher}}<div class="meta">{{if .Room}}<span class="room">{{.Room}}</span>{{end}}{{if and .Room .Teacher}} · {{end}}{{if .Teacher}}<span>{{.Teacher}}</span>{{end}}</div>{{end}}
         {{- if .Info}}<div class="info">{{.Info}}</div>{{end}}
         {{- if .Badge}}<span class="badge">{{.Badge}}</span>{{end}}
       </div>
@@ -305,7 +317,7 @@ td.info { color: #475467; font-size: 12px; }
       {{- range .Lessons}}
         <tr class="{{.Kind}}" style="{{.Style}}">
           <td class="time">{{.Time}}</td>
-          <td class="subj"><b>{{.Subject}}</b>{{if .SubjectLong}}<span class="long">{{.SubjectLong}}</span>{{end}}</td>
+          <td class="subj"><b>{{.Name}}</b>{{if .SubjectLong}}<span class="long">{{.Subject}}</span>{{end}}</td>
           <td>{{.Teacher}}</td>
           <td>{{.Room}}</td>
           <td class="info">{{if .Badge}}<span class="badge">{{.Badge}}</span> {{end}}{{.Info}}</td>

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -63,13 +64,14 @@ func titleCase(s string) string {
 	if strings.ToUpper(s) != s {
 		return s
 	}
-	words := strings.Fields(strings.ToLower(s))
-	for i, w := range words {
-		if len(w) > 0 {
-			words[i] = strings.ToUpper(w[:1]) + w[1:]
+	r := []rune(strings.ToLower(s))
+	for i := range r {
+		// capitalize words, also after "." / "-" / "/" ("Sek.I", "Kath.-Religion")
+		if i == 0 || strings.ContainsRune(" .-/(", r[i-1]) {
+			r[i] = unicode.ToUpper(r[i])
 		}
 	}
-	return strings.Join(words, " ")
+	return strings.Join(strings.Fields(string(r)), " ")
 }
 
 func ttTitle(tt *webuntis.Timetable) string {

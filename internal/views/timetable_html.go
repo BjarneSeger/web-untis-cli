@@ -40,6 +40,8 @@ type htmlGrid struct {
 	// Columns / Rows are the CSS grid track definitions.
 	Columns template.CSS
 	Rows    template.CSS
+	// Scale shrinks the print font for days with many periods.
+	Scale template.CSS
 }
 
 type htmlCol struct {
@@ -70,8 +72,9 @@ type htmlBlock struct {
 
 type htmlLesson struct {
 	Time        string
-	Subject     string
-	SubjectLong string
+	Subject     string // short name, e.g. "D"
+	SubjectLong string // full name if it differs, e.g. "Deutsch"
+	Name        string // full name, falling back to the short one
 	Teacher     template.HTML
 	Room        template.HTML
 	Class       string
@@ -124,6 +127,7 @@ func buildHTMLGrid(tt *webuntis.Timetable) *htmlGrid {
 	g := &htmlGrid{
 		Columns: template.CSS(fmt.Sprintf("4.6em repeat(%d, minmax(0, 1fr))", len(days))),
 		Rows:    template.CSS(fmt.Sprintf("auto repeat(%d, minmax(var(--row-min), 1fr))", len(slots))),
+		Scale:   template.CSS(strconv.FormatFloat(printScale(len(slots)), 'f', 2, 64)),
 	}
 	for i, s := range slots {
 		g.Slots = append(g.Slots, htmlSlot{Label: strings.TrimSpace(s.label), Start: s.start, End: s.end, Row: i + 2})
@@ -204,6 +208,15 @@ func buildHTMLGrid(tt *webuntis.Timetable) *htmlGrid {
 	return g
 }
 
+// printScale fits the lesson text into one A4 landscape page: full size up
+// to 8 periods, smaller for longer days.
+func printScale(slots int) float64 {
+	if slots <= 8 {
+		return 1
+	}
+	return max(0.62, 1-0.065*float64(slots-8))
+}
+
 func buildHTMLDays(tt *webuntis.Timetable) []htmlDay {
 	var out []htmlDay
 	for _, day := range tt.Days {
@@ -241,6 +254,7 @@ func htmlLessonOf(l webuntis.Lesson) htmlLesson {
 	if long := l.SubjectLong(); long != "" && long != h.Subject {
 		h.SubjectLong = titleCase(long)
 	}
+	h.Name = firstNonEmpty(h.SubjectLong, h.Subject)
 	switch {
 	case l.Cancelled():
 		h.Kind, h.Badge = "cancelled", "Entfall"

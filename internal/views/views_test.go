@@ -171,7 +171,7 @@ func TestTimetableHTML(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"<!doctype html>", "size: A4 landscape", `class="lesson cancelled"`, `class="lesson changed"`, `class="lesson exam"`,
-		"<ins>VER</ins> <s>SAL</s>", "grid-column: 3", "Treffpunkt &lt;Schulhof&gt;", "Wandertag", "KW 39"} {
+		"<ins>VER</ins> <s>SAL</s>", "grid-column: 3", "Treffpunkt &lt;Schulhof&gt;", "Wandertag", "KW 39", ">Deutsch</div>", ">Kath. Religion</div>"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("grid html missing %q", want)
 		}
