@@ -176,7 +176,7 @@ Items not shown before are marked with 🆕 (tracked in <profile>/news-seen.json
 const ownClass = "@own"
 
 func (a *app) timetableCmd() *cobra.Command {
-	var date, class, resType, resName, outFile string
+	var date, class, resType, resName, outFile, pdfEngine string
 	var day, grid, list, next bool
 	var days int
 	cmd := &cobra.Command{
@@ -192,9 +192,11 @@ Pretty output is a colored week grid; --list shows one table per day.
 Use -o ics to export as calendar (e.g. for subscriptions via cron).
 
 -o html writes a standalone page for the browser or printing (a week fits
-on one A4 landscape page). -o pdf prints that page to PDF with a headless
-Chrome/Chromium/Edge ($WEBUNTIS_BROWSER selects one); it is written to
---file, to stdout when piped, or else to stundenplan-<date>.pdf.`,
+on one A4 landscape page). -o pdf writes the same layout as PDF to --file,
+to stdout when piped, or else to stundenplan-<date>.pdf. --pdf-engine:
+  auto     headless Chrome/Chromium/Edge if installed, else native (default)
+  browser  print the HTML page with the browser ($WEBUNTIS_BROWSER selects one)
+  native   built-in renderer, needs no browser (servers, cron)`,
 		Example: `  webuntis timetable
   webuntis tt next-week
   webuntis tt --day tomorrow
@@ -270,7 +272,7 @@ Chrome/Chromium/Edge ($WEBUNTIS_BROWSER selects one); it is written to
 			useGrid := !list && !day && (grid || end.Sub(start) <= 7*24*time.Hour)
 			cal := func() *ics.Calendar { return views.TimetableICS(tt, c.Profile.School) }
 			if a.format == render.HTMLPage || a.format == render.PDF {
-				return a.timetableDocument(ctx, tt, name, useGrid, start, outFile)
+				return a.timetableDocument(ctx, tt, name, useGrid, start, outFile, pdfEngine)
 			}
 			if a.format == render.Pretty && useGrid {
 				r := a.renderer()
@@ -296,20 +298,26 @@ Chrome/Chromium/Edge ($WEBUNTIS_BROWSER selects one); it is written to
 	f.StringVar(&resType, "resource-type", "", "other timetable type: TEACHER, ROOM, SUBJECT, STUDENT (if permitted)")
 	f.StringVar(&resName, "resource", "", "name or id for --resource-type")
 	f.StringVarP(&outFile, "file", "O", "", "write html/pdf output to this file")
+	f.StringVar(&pdfEngine, "pdf-engine", envOr("WEBUNTIS_PDF_ENGINE", "auto"), "pdf renderer: auto, browser or native (no browser needed)")
+	_ = cmd.RegisterFlagCompletionFunc("pdf-engine", staticCompletion("auto", "browser", "native"))
 	return cmd
 }
 
 // timetableDocument writes the timetable as HTML or PDF.
-func (a *app) timetableDocument(ctx context.Context, tt *webuntis.Timetable, name string, grid bool, start time.Time, outFile string) error {
-	page, err := views.TimetableHTML(tt, name, grid)
-	if err != nil {
-		return err
-	}
+func (a *app) timetableDocument(ctx context.Context, tt *webuntis.Timetable, name string, grid bool, start time.Time, outFile, engine string) error {
 	if a.format == render.HTMLPage {
+		page, err := views.TimetableHTML(tt, name, grid)
+		if err != nil {
+			return err
+		}
 		if outFile == "" || outFile == "-" {
 			return a.renderer().Raw(page)
 		}
 		return os.WriteFile(outFile, []byte(page), 0o644)
+	}
+	pdf, err := timetablePDF(ctx, tt, name, grid, engine)
+	if err != nil {
+		return err
 	}
 	if outFile == "" {
 		outFile = "-"
@@ -317,11 +325,34 @@ func (a *app) timetableDocument(ctx context.Context, tt *webuntis.Timetable, nam
 			outFile = "stundenplan-" + dates.ISO(start) + ".pdf"
 		}
 	}
-	if err := render.HTMLToPDF(ctx, page, outFile); err != nil {
+	if outFile == "-" {
+		_, err = os.Stdout.Write(pdf)
 		return err
 	}
-	if outFile != "-" {
-		fmt.Fprintln(os.Stderr, "PDF gespeichert:", outFile)
+	if err := os.WriteFile(outFile, pdf, 0o644); err != nil {
+		return err
 	}
+	fmt.Fprintln(os.Stderr, "PDF gespeichert:", outFile)
 	return nil
+}
+
+// timetablePDF renders the PDF with a headless browser (best fidelity) or
+// the built-in renderer, which works without any browser.
+func timetablePDF(ctx context.Context, tt *webuntis.Timetable, name string, grid bool, engine string) ([]byte, error) {
+	switch strings.ToLower(engine) {
+	case "native":
+		return views.TimetablePDF(tt, name, grid)
+	case "auto", "":
+		if _, err := render.FindBrowser(); err != nil {
+			return views.TimetablePDF(tt, name, grid)
+		}
+	case "browser", "chrome", "chromium":
+	default:
+		return nil, fmt.Errorf("unknown --pdf-engine %q (auto, browser, native)", engine)
+	}
+	page, err := views.TimetableHTML(tt, name, grid)
+	if err != nil {
+		return nil, err
+	}
+	return render.HTMLToPDF(ctx, page)
 }

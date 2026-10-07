@@ -84,6 +84,10 @@ type htmlLesson struct {
 	Style       template.CSS
 	Row, RowEnd int
 	Lane        int
+
+	// for the native PDF renderer
+	Teachers, Rooms []webuntis.Element
+	BG, Accent      string
 }
 
 type htmlDay struct {
@@ -96,6 +100,16 @@ type htmlDay struct {
 // TimetableHTML renders the timetable as a standalone, printable HTML page:
 // a week grid (one A4 landscape page) or, with grid=false, one table per day.
 func TimetableHTML(tt *webuntis.Timetable, name string, grid bool) (string, error) {
+	p := buildPage(tt, name, grid)
+	var b strings.Builder
+	if err := timetableTmpl.Execute(&b, p); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// buildPage builds the view model shared by the HTML and PDF renderers.
+func buildPage(tt *webuntis.Timetable, name string, grid bool) htmlPage {
 	p := htmlPage{
 		Title:     strings.TrimPrefix(ttTitle(tt), "📅 "),
 		Subtitle:  rangeLabel(tt),
@@ -111,11 +125,7 @@ func TimetableHTML(tt *webuntis.Timetable, name string, grid bool) (string, erro
 		p.Days = buildHTMLDays(tt)
 		p.Empty = len(p.Days) == 0
 	}
-	var b strings.Builder
-	if err := timetableTmpl.Execute(&b, p); err != nil {
-		return "", err
-	}
-	return b.String(), nil
+	return p
 }
 
 func buildHTMLGrid(tt *webuntis.Timetable) *htmlGrid {
@@ -241,12 +251,14 @@ func buildHTMLDays(tt *webuntis.Timetable) []htmlDay {
 
 func htmlLessonOf(l webuntis.Lesson) htmlLesson {
 	h := htmlLesson{
-		Time:    l.Start.Format("15:04") + "–" + l.End.Format("15:04"),
-		Subject: l.SubjectLabel(),
-		Teacher: htmlElements(l.Teachers),
-		Room:    htmlElements(l.Rooms),
-		Class:   l.ClassLabel(),
-		Info:    l.Info(),
+		Time:     l.Start.Format("15:04") + "–" + l.End.Format("15:04"),
+		Subject:  l.SubjectLabel(),
+		Teacher:  htmlElements(l.Teachers),
+		Room:     htmlElements(l.Rooms),
+		Class:    l.ClassLabel(),
+		Info:     l.Info(),
+		Teachers: l.Teachers,
+		Rooms:    l.Rooms,
 	}
 	if l.AllDay {
 		h.Time = "ganztägig"
@@ -270,7 +282,8 @@ func htmlLessonOf(l webuntis.Lesson) htmlLesson {
 	case l.Changed():
 		h.Kind, h.Badge = "changed", "geändert"
 	}
-	h.Style = lessonColors(l)
+	h.BG, h.Accent = lessonColors(l)
+	h.Style = template.CSS("--bg:" + h.BG + ";--accent:" + h.Accent)
 	return h
 }
 
@@ -294,9 +307,10 @@ func htmlElements(el []webuntis.Element) template.HTML {
 
 var hexColor = regexp.MustCompile(`^#?([0-9a-fA-F]{6})$`)
 
-// lessonColors returns CSS variables for the lesson card: the WebUntis
-// subject color if set, otherwise a stable color derived from the subject.
-func lessonColors(l webuntis.Lesson) template.CSS {
+// lessonColors returns the background and accent color of a lesson card:
+// the WebUntis subject color if set, otherwise a stable color derived from
+// the subject.
+func lessonColors(l webuntis.Lesson) (bg, accent string) {
 	var r, g, b float64
 	if m := hexColor.FindStringSubmatch(strings.TrimSpace(l.Color)); m != nil {
 		v, _ := strconv.ParseUint(m[1], 16, 32)
@@ -307,9 +321,7 @@ func lessonColors(l webuntis.Lesson) template.CSS {
 		r, g, b = hslToRGB(float64(h.Sum32()%360), 0.62, 0.5)
 	}
 	mix := func(c, with, f float64) float64 { return c*(1-f) + with*f }
-	bg := hexOf(mix(r, 1, 0.84), mix(g, 1, 0.84), mix(b, 1, 0.84))
-	accent := hexOf(mix(r, 0, 0.25), mix(g, 0, 0.25), mix(b, 0, 0.25))
-	return template.CSS("--bg:" + bg + ";--accent:" + accent)
+	return hexOf(mix(r, 1, 0.84), mix(g, 1, 0.84), mix(b, 1, 0.84)), hexOf(mix(r, 0, 0.25), mix(g, 0, 0.25), mix(b, 0, 0.25))
 }
 
 func hexOf(r, g, b float64) string {

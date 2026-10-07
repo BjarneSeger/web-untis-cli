@@ -68,8 +68,10 @@ Read-only [WebUntis](https://webuntis.com) client for the terminal. Works with a
 - `--debug`: log HTTP requests.
 
 **Printing the timetable:** `-o html` writes a standalone page for the browser or printing. A week fits on
-one A4 landscape page; `--list` and `--day` print as A4 portrait. `-o pdf` prints that page to PDF with a
-headless Chrome, Chromium or Edge (`$WEBUNTIS_BROWSER` selects the executable):
+one A4 landscape page; `--list` and `--day` print as A4 portrait. `-o pdf` writes the same layout as PDF.
+It uses a headless Chrome, Chromium or Edge if one is installed (`$WEBUNTIS_BROWSER` selects the executable),
+otherwise a built-in renderer that needs no browser, so it also works on headless servers.
+`--pdf-engine native|browser` (or `$WEBUNTIS_PDF_ENGINE`) forces one of them:
 
 ```sh
 webuntis tt -o html > stundenplan.html
@@ -115,7 +117,7 @@ session has expired.
   `$WEBUNTIS_SMTP_PASSWORD` override the stored credentials.
 - `logout --forget` removes the keyring entries.
 
-Environment variables: `WEBUNTIS_PROFILE`, `WEBUNTIS_OUTPUT`, `WEBUNTIS_STYLE`, `WEBUNTIS_FORM_THEME`, `WEBUNTIS_NO_KEYRING`, `WEBUNTIS_BROWSER`.
+Environment variables: `WEBUNTIS_PROFILE`, `WEBUNTIS_OUTPUT`, `WEBUNTIS_STYLE`, `WEBUNTIS_FORM_THEME`, `WEBUNTIS_NO_KEYRING`, `WEBUNTIS_BROWSER`, `WEBUNTIS_PDF_ENGINE`.
 
 ## How it works
 
@@ -126,6 +128,8 @@ There is no public API for end users. The official JSON-RPC API (`/WebUntis/json
 - Klassengeld: logs in via WebUntis single sign-on and reads the klassengeld.app pages.
 
 See `internal/webuntis/`. These APIs are undocumented and may change.
+
+The built-in PDF renderer embeds the [Inter](https://rsms.me/inter/) font (SIL Open Font License, `internal/views/fonts/OFL.txt`).
 
 ## Development
 

@@ -1,6 +1,8 @@
 package views
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -191,5 +193,24 @@ func TestTimetableHTML(t *testing.T) {
 	if dir := os.Getenv("HTML_OUT"); dir != "" {
 		_ = os.WriteFile(dir+"/grid.html", []byte(page), 0o644)
 		_ = os.WriteFile(dir+"/list.html", []byte(list), 0o644)
+	}
+}
+
+func TestTimetablePDF(t *testing.T) {
+	for _, grid := range []bool{true, false} {
+		tt := fullWeek()
+		if !grid {
+			tt = sampleTimetable()
+		}
+		b, err := TimetablePDF(tt, "", grid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(b, []byte("%PDF-")) || bytes.Count(b, []byte("/Type /Page\n")) != 1 {
+			t.Errorf("grid=%v: want a one-page PDF", grid)
+		}
+		if dir := os.Getenv("HTML_OUT"); dir != "" {
+			_ = os.WriteFile(fmt.Sprintf("%s/native-%v.pdf", dir, grid), b, 0o644)
+		}
 	}
 }

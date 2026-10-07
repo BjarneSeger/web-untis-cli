@@ -15,7 +15,7 @@ import (
 )
 
 // ErrNoBrowser is returned when no Chrome/Chromium-based browser was found.
-var ErrNoBrowser = errors.New("pdf output needs Chrome, Chromium or Edge; install one or set $WEBUNTIS_BROWSER to its executable")
+var ErrNoBrowser = errors.New("no Chrome, Chromium or Edge found; install one, set $WEBUNTIS_BROWSER to its executable or use --pdf-engine native")
 
 // FindBrowser returns the path of a Chrome/Chromium-based browser that can
 // print to PDF headlessly. $WEBUNTIS_BROWSER and $CHROME_PATH take precedence.
@@ -58,21 +58,21 @@ func FindBrowser() (string, error) {
 	return "", ErrNoBrowser
 }
 
-// HTMLToPDF prints a standalone HTML page to a PDF file with a headless
+// HTMLToPDF prints a standalone HTML page to PDF with a headless
 // Chrome/Chromium. Page size and orientation come from the page's @page CSS.
-func HTMLToPDF(ctx context.Context, html, out string) error {
+func HTMLToPDF(ctx context.Context, html string) ([]byte, error) {
 	browser, err := FindBrowser()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "webuntis-pdf-")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	src := filepath.Join(dir, "page.html")
 	if err := os.WriteFile(src, []byte(html), 0o600); err != nil {
-		return err
+		return nil, err
 	}
 	pdf := filepath.Join(dir, "page.pdf")
 	args := []string{
@@ -106,13 +106,9 @@ func HTMLToPDF(ctx context.Context, html, out string) error {
 	if err != nil || len(data) == 0 {
 		msg := strings.TrimSpace(stderr.String())
 		if runErr != nil {
-			return fmt.Errorf("%s: %w\n%s", filepath.Base(browser), runErr, msg)
+			return nil, fmt.Errorf("%s: %w\n%s", filepath.Base(browser), runErr, msg)
 		}
-		return fmt.Errorf("%s did not produce a PDF\n%s", filepath.Base(browser), msg)
+		return nil, fmt.Errorf("%s did not produce a PDF\n%s", filepath.Base(browser), msg)
 	}
-	if out == "-" {
-		_, err = os.Stdout.Write(data)
-		return err
-	}
-	return os.WriteFile(out, data, 0o644)
+	return data, nil
 }
