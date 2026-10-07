@@ -7,7 +7,9 @@ import (
 
 func TestWithoutChanges(t *testing.T) {
 	mon := time.Date(2026, 9, 21, 0, 0, 0, 0, time.Local)
-	h := func(hh, mm int) time.Time { return mon.Add(time.Duration(hh)*time.Hour + time.Duration(mm)*time.Minute) }
+	h := func(hh, mm int) time.Time {
+		return mon.Add(time.Duration(hh)*time.Hour + time.Duration(mm)*time.Minute)
+	}
 	moved := h(12, 20)
 	tt := &Timetable{Days: []TimetableDay{{Date: mon, Lessons: []Lesson{
 		{AllDay: true, Type: "EVENT", Name: "Wandertag"},
