@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="webuntis-cli">
+<title>{{.Title}} · {{.Subtitle}}</title>
+<style>
+:root {
+  --ink: #1c2230;
+  --muted: #667085;
+  --line: #e4e7ec;
+  --paper: #ffffff;
+  --canvas: #f4f5f8;
+  --head: #f8f9fb;
+  --today: #eef4ff;
+  --today-ink: #2f5bd3;
+  --changed: #d97706;
+  --changed-bg: #fff7e6;
+  --cancelled: #d92d20;
+  --exam: #7a3ee8;
+  --row-min: 3.9em;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 13px/1.35 "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.page {
+  max-width: 1400px;
+  margin: 24px auto;
+  padding: 28px 32px 22px;
+  background: var(--paper);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.08);
+}
+.list .page { max-width: 980px; }
+header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--ink);
+}
+h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
+.sub { margin-top: 3px; color: var(--muted); font-size: 13.5px; font-weight: 500; }
+.stamp { color: var(--muted); font-size: 11px; text-align: right; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- week grid */
+.grid {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.grid > * { min-width: 0; min-height: 0; }
+.dayhead {
+  grid-row: 1;
+  padding: 8px 10px 7px;
+  background: var(--head);
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+.dayhead .wd { font-weight: 700; font-size: 13.5px; }
+.dayhead .dt { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.dayhead.today { background: var(--today); box-shadow: inset 0 3px 0 var(--today-ink); }
+.dayhead.today .wd, .dayhead.today .dt { color: var(--today-ink); }
+.dayhead .status { display: block; color: var(--muted); font-size: 11px; font-style: italic; }
+.corner { grid-row: 1; grid-column: 1; background: var(--head); border-bottom: 1px solid var(--line); }
+.chip {
+  display: block;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.period {
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  background: var(--head);
+  line-height: 1.15;
+}
+.period .no { font-weight: 700; font-size: 14px; }
+.period .tm { color: var(--muted); font-size: 10.5px; }
+.cell { border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.cell.today { background: var(--today); }
+.block {
+  display: grid;
+  gap: 3px;
+  padding: 3px;
+  z-index: 1;
+}
+.lesson {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px 7px 4px 9px;
+  border-radius: 6px;
+  background: var(--bg);
+  border-left: 4px solid var(--accent);
+  min-width: 0;
+}
+.lesson .top { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; min-width: 0; }
+.lesson .subj { flex: 1 1 auto; font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lesson .room { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lesson .meta { font-size: 12px; color: #3d4556; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lesson .long { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lesson .info {
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: #475467;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.badge {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  line-height: 1.6;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--changed);
+}
+.lesson .badge { position: absolute; right: 4px; bottom: 4px; }
+.lesson.changed { background: var(--changed-bg); border-left-color: var(--changed); box-shadow: inset 0 0 0 1.5px var(--changed); }
+.lesson.exam { box-shadow: inset 0 0 0 1.5px var(--exam); }
+.lesson.exam .badge, tr.exam .badge { background: var(--exam); }
+.lesson.event .badge, tr.event .badge { background: #0e9384; }
+.lesson.cancelled {
+  background: repeating-linear-gradient(135deg, #f7f7f8 0 6px, #eff0f2 6px 12px);
+  border-left-color: var(--cancelled);
+  color: var(--muted);
+}
+.lesson.cancelled .subj { text-decoration: line-through; text-decoration-color: var(--cancelled); text-decoration-thickness: 2px; }
+.lesson.cancelled .meta, .lesson.cancelled .room { color: var(--muted); }
+.cancelled .badge { background: var(--cancelled); }
+ins { text-decoration: none; font-weight: 700; color: var(--changed); }
+s { color: var(--muted); }
+
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 18px; height: 11px; border-radius: 3px; display: inline-block; }
+.swatch.changed { background: var(--changed-bg); box-shadow: inset 0 0 0 1.5px var(--changed); }
+.swatch.cancelled { background: repeating-linear-gradient(135deg, #f7f7f8 0 3px, #e4e5e8 3px 6px); border-left: 3px solid var(--cancelled); }
+.swatch.exam { box-shadow: inset 0 0 0 1.5px var(--exam); background: #fff; }
+.swatch.today { background: var(--today); box-shadow: inset 0 2px 0 var(--today-ink); }
+footer .brand { margin-left: auto; }
+
+/* ---------------------------------------------------------------- list view */
+section.day { margin-bottom: 20px; break-inside: avoid; page-break-inside: avoid; }
+section.day h2 { margin: 0 0 8px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+section.day.today h2 { color: var(--today-ink); }
+.pill { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 99px; background: var(--today); color: var(--today-ink); }
+table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--head); padding: 7px 10px; border-bottom: 1px solid var(--line); }
+td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+tbody tr:first-child td { border-top: 0; }
+td.time { white-space: nowrap; color: var(--muted); }
+td.subj { border-left: 4px solid var(--accent); background: var(--bg); }
+td.subj b { font-size: 14px; }
+td.subj .long { display: block; font-size: 11px; color: var(--muted); }
+tr.cancelled td { color: var(--muted); }
+tr.cancelled td.subj { border-left-color: var(--cancelled); background: #f4f4f5; }
+tr.cancelled td.subj b { text-decoration: line-through; text-decoration-color: var(--cancelled); }
+tr.changed td { background: var(--changed-bg); }
+tr.changed td.subj { border-left-color: var(--changed); }
+td.info { color: #475467; font-size: 12px; }
+.empty { color: var(--muted); font-style: italic; margin: 0; }
+
+@media screen and (max-width: 760px) {
+  .page { margin: 0; border-radius: 0; padding: 18px 12px; }
+  header { flex-direction: column; align-items: flex-start; }
+  .stamp { text-align: left; }
+  .grid-wrap { overflow-x: auto; }
+  .grid { min-width: 720px; }
+}
+
+/* ---------------------------------------------------------------- print */
+@page { size: A4 landscape; margin: 8mm; }
+@page list { size: A4 portrait; margin: 12mm; }
+@media print {
+  body { background: #fff; font-size: 9pt; }
+  .list { page: list; }
+  .page { max-width: none; margin: 0; padding: 0; border-radius: 0; box-shadow: none; }
+  .grid-page .page { height: 193mm; display: flex; flex-direction: column; overflow: hidden; }
+  .grid-page .grid-wrap { flex: 1 1 auto; min-height: 0; display: flex; }
+  .grid-page .grid { flex: 1 1 auto; --row-min: 0; }
+  header { padding-bottom: 2.5mm; margin-bottom: 3mm; }
+  h1 { font-size: 15pt; }
+  .sub { font-size: 10pt; }
+  .stamp { font-size: 7.5pt; }
+  .dayhead { padding: 1.5mm 2.5mm; }
+  .dayhead .wd { font-size: 10pt; }
+  .dayhead .dt { font-size: 9pt; }
+  .chip { font-size: 7.5pt; }
+  .period .no { font-size: 10pt; }
+  .period .tm { font-size: 7pt; }
+  .block { padding: 0.6mm; gap: 0.6mm; }
+  .lesson { padding: 0.8mm 1.6mm 0.8mm 2mm; border-left-width: 1mm; border-radius: 1.2mm; }
+  .lesson .subj { font-size: 10pt; }
+  .lesson .room, .lesson .meta { font-size: 8pt; }
+  .lesson .long { font-size: 7pt; }
+  .lesson .info { font-size: 7pt; -webkit-line-clamp: 1; }
+  .badge { font-size: 6.5pt; padding: 0 1mm; }
+  footer { margin-top: 2mm; font-size: 7.5pt; }
+  td, th { padding: 1.6mm 2.4mm; }
+  td.subj b { font-size: 10.5pt; }
+  td.info { font-size: 8.5pt; }
+  section.day { margin-bottom: 5mm; }
+  section.day h2 { font-size: 12pt; margin-bottom: 2mm; }
+}
+</style>
+</head>
+<body class="{{if .Grid}}grid-page{{else}}list{{end}}">
+<main class="page">
+  <header>
+    <div>
+      <h1>{{.Title}}</h1>
+      <div class="sub">{{.Subtitle}}</div>
+    </div>
+    <div class="stamp">{{.Generated}}</div>
+  </header>
+{{- if .Empty}}
+  <p class="empty">Keine Einträge.</p>
+{{- else if .Grid}}{{with .Grid}}
+  <div class="grid-wrap">
+  <div class="grid" style="grid-template-columns: {{.Columns}}; grid-template-rows: {{.Rows}};">
+    <div class="corner"></div>
+    {{- range $i, $c := .Cols}}
+    <div class="dayhead{{if $c.Today}} today{{end}}" style="grid-column: {{add $i 2}};">
+      <span class="wd">{{$c.Weekday}}</span><span class="dt">{{$c.Date}}</span>
+      {{- if $c.Status}}<span class="status">{{$c.Status}}</span>{{end}}
+      {{- range $c.AllDay}}<span class="chip" style="{{.Style}}" title="{{.Subject}}{{if .Info}} · {{.Info}}{{end}}">{{.Subject}}{{if .Info}} · {{.Info}}{{end}}</span>{{end}}
+    </div>
+    {{- end}}
+    {{- range .Slots}}
+    <div class="period" style="grid-row: {{.Row}};"><span class="no">{{if .Label}}{{.Label}}{{else}}·{{end}}</span><span class="tm">{{.Start}}</span><span class="tm">{{.End}}</span></div>
+    {{- end}}
+    {{- range .Cells}}
+    <div class="cell{{if .Today}} today{{end}}" style="grid-row: {{.Row}}; grid-column: {{.Col}};"></div>
+    {{- end}}
+    {{- range .Blocks}}
+    <div class="block" style="grid-row: {{.RowStart}} / {{.RowEnd}}; grid-column: {{.Col}}; grid-template-rows: repeat({{.Rows}}, minmax(0, 1fr)); grid-template-columns: repeat({{.Lanes}}, minmax(0, 1fr));">
+      {{- range .Lessons}}
+      <div class="lesson {{.Kind}}" style="{{.Style}}; grid-row: {{.Row}} / {{.RowEnd}}; grid-column: {{.Lane}};" title="{{.Time}} {{.Subject}}{{if .SubjectLong}} ({{.SubjectLong}}){{end}}{{if .Info}} · {{.Info}}{{end}}">
+        <div class="top"><span class="subj">{{.Subject}}</span>{{if .Room}}<span class="room">{{.Room}}</span>{{end}}</div>
+        {{- if .Teacher}}<div class="meta">{{.Teacher}}</div>{{end}}
+        {{- if .Info}}<div class="info">{{.Info}}</div>{{end}}
+        {{- if .Badge}}<span class="badge">{{.Badge}}</span>{{end}}
+      </div>
+      {{- end}}
+    </div>
+    {{- end}}
+  </div>
+  </div>
+  <footer>
+    <span class="key"><span class="swatch changed"></span>Änderung</span>
+    <span class="key"><span class="swatch cancelled"></span>Entfall</span>
+    <span class="key"><span class="swatch exam"></span>Prüfung</span>
+    <span class="key"><span class="swatch today"></span>Heute</span>
+    <span class="brand">webuntis-cli</span>
+  </footer>
+{{- end}}{{else}}
+  {{- range .Days}}
+  <section class="day{{if .Today}} today{{end}}">
+    <h2>{{.Title}}{{if .Today}} <span class="pill">heute</span>{{end}}</h2>
+    {{- if .Note}}
+    <p class="empty">{{.Note}}</p>
+    {{- else}}
+    <table>
+      <colgroup><col style="width: 15%"><col style="width: 22%"><col style="width: 18%"><col style="width: 12%"><col></colgroup>
+      <thead><tr><th>Zeit</th><th>Fach</th><th>Lehrkraft</th><th>Raum</th><th>Hinweis</th></tr></thead>
+      <tbody>
+      {{- range .Lessons}}
+        <tr class="{{.Kind}}" style="{{.Style}}">
+          <td class="time">{{.Time}}</td>
+          <td class="subj"><b>{{.Subject}}</b>{{if .SubjectLong}}<span class="long">{{.SubjectLong}}</span>{{end}}</td>
+          <td>{{.Teacher}}</td>
+          <td>{{.Room}}</td>
+          <td class="info">{{if .Badge}}<span class="badge">{{.Badge}}</span> {{end}}{{.Info}}</td>
+        </tr>
+      {{- end}}
+      </tbody>
+    </table>
+    {{- end}}
+  </section>
+  {{- end}}
+  <footer><span class="key"><span class="swatch changed"></span>Änderung</span><span class="key"><span class="swatch cancelled"></span>Entfall</span><span class="brand">webuntis-cli</span></footer>
+{{- end}}
+</main>
+</body>
+</html>

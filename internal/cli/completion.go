@@ -82,7 +82,7 @@ func (a *app) withClient(fn func(ctx context.Context, c *webuntis.Client) []stri
 func (a *app) registerCompletions(root *cobra.Command) {
 	pf := root.PersistentFlags()
 	_ = root.RegisterFlagCompletionFunc("profile", completeProfiles)
-	_ = root.RegisterFlagCompletionFunc("output", staticCompletion("pretty", "markdown", "json", "yaml", "ics"))
+	_ = root.RegisterFlagCompletionFunc("output", staticCompletion("pretty", "markdown", "json", "yaml", "ics", "html", "pdf"))
 	_ = root.RegisterFlagCompletionFunc("style", staticCompletion("auto", "dark", "light", "notty", "dracula", "tokyo-night", "pink", "ascii"))
 	_ = pf
 	_ = root.RegisterFlagCompletionFunc("student", a.withClient(func(ctx context.Context, c *webuntis.Client) []string {

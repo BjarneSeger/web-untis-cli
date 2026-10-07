@@ -90,7 +90,7 @@ Get started:
 		},
 	}
 	pf := root.PersistentFlags()
-	pf.StringVarP(&a.output, "output", "o", envOr("WEBUNTIS_OUTPUT", "pretty"), "output format: pretty, markdown, json, yaml, ics (where supported)")
+	pf.StringVarP(&a.output, "output", "o", envOr("WEBUNTIS_OUTPUT", "pretty"), "output format: pretty, markdown, json, yaml, ics, html, pdf (where supported)")
 	pf.StringVarP(&a.profile, "profile", "p", "", "profile to use (default: the current profile, see: webuntis profiles)")
 	pf.StringVarP(&a.student, "student", "s", "", "student name or id (for parent accounts with several children)")
 	pf.BoolVarP(&a.refresh, "refresh", "r", false, "bypass the local cache and fetch fresh data")
@@ -171,6 +171,8 @@ func (a *app) emit(data any, md func() string, cal func() *ics.Calendar) error {
 			return errors.New("ics output is not supported for this command (supported: timetable, exams, homework, absences)")
 		}
 		return r.Calendar(cal())
+	case render.HTMLPage, render.PDF:
+		return fmt.Errorf("%s output is only supported for timetable", a.format)
 	default:
 		return r.Markdown(md())
 	}
