@@ -215,6 +215,90 @@ type Timetable struct {
 	End          time.Time      `json:"end" yaml:"end"`
 	Days         []TimetableDay `json:"days" yaml:"days"`
 	TimeGrid     []TimeUnit     `json:"timeGrid,omitempty" yaml:"timeGrid,omitempty"`
+	// Regular is set by WithoutChanges(): changes have been removed.
+	Regular bool `json:"regular,omitempty" yaml:"regular,omitempty"`
+}
+
+// WithoutChanges returns the regular timetable (Regelstundenplan) without changes:
+// cancelled lessons take place, substituted teachers / rooms / subjects
+// are replaced by the original ones, and additional or moved-in lessons,
+// exams, events and all-day entries are dropped. It is derived from the
+// change information WebUntis sends along with each entry.
+func (tt *Timetable) WithoutChanges() *Timetable {
+	out := *tt
+	out.Regular = true
+	out.Days = make([]TimetableDay, len(tt.Days))
+	for i, d := range tt.Days {
+		nd := d
+		nd.Lessons = nil
+		seen := map[string]bool{}
+		var exams []Lesson
+		for _, l := range d.Lessons {
+			if l.exam() {
+				exams = append(exams, l)
+				continue
+			}
+			if l.extra() {
+				continue
+			}
+			r := Lesson{
+				IDs: l.IDs, Start: l.Start, End: l.End, Type: l.Type, Status: "REGULAR", Name: l.Name,
+				Subjects: regularElements(l.Subjects), Teachers: regularElements(l.Teachers),
+				Rooms: regularElements(l.Rooms), Classes: regularElements(l.Classes), Others: regularElements(l.Others),
+				LessonInfo: l.LessonInfo, Color: l.Color,
+			}
+			key := r.Start.String() + r.End.String() + r.SubjectLabel() + r.TeacherLabel() + r.RoomLabel()
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			nd.Lessons = append(nd.Lessons, r)
+		}
+		// An exam replaces the lesson it is written in: keep it as that
+		// lesson unless the regular lesson is there anyway.
+		for _, e := range exams {
+			free := len(e.Subjects) > 0
+			for _, l := range nd.Lessons {
+				if l.Start.Before(e.End) && e.Start.Before(l.End) {
+					free = false
+				}
+			}
+			if free {
+				nd.Lessons = append(nd.Lessons, Lesson{IDs: e.IDs, Start: e.Start, End: e.End, Type: "NORMAL_TEACHING_PERIOD", Status: "REGULAR",
+					Subjects: regularElements(e.Subjects), Teachers: regularElements(e.Teachers), Rooms: regularElements(e.Rooms),
+					Classes: regularElements(e.Classes), Color: e.Color})
+			}
+		}
+		sort.SliceStable(nd.Lessons, func(i, j int) bool { return nd.Lessons[i].Start.Before(nd.Lessons[j].Start) })
+		out.Days[i] = nd
+	}
+	return &out
+}
+
+// extra reports entries that are not part of the regular timetable.
+func (l Lesson) extra() bool {
+	t := strings.ToUpper(l.Type)
+	return l.AllDay || l.Status == "ADDITIONAL" || t == "ADDITIONAL_PERIOD" || t == "EVENT"
+}
+
+func (l Lesson) exam() bool { return !l.AllDay && strings.Contains(strings.ToUpper(l.Type), "EXAM") }
+
+// regularElements restores the original elements of a changed lesson.
+func regularElements(el []Element) []Element {
+	var out []Element
+	for _, e := range el {
+		switch {
+		case e.Removed != "" && e.Removed == e.Name:
+			out = append(out, Element{Name: e.Name, LongName: e.LongName, Status: "REGULAR"})
+		case e.Removed != "":
+			out = append(out, Element{Name: e.Removed, Status: "REGULAR"})
+		case e.Status == "ADDED":
+		default:
+			e.Status = "REGULAR"
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // TimetableQuery selects what to fetch.

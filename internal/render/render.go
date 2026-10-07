@@ -1,5 +1,5 @@
 // Package render turns data into terminal output: Markdown rendered with
-// glamour (pretty), raw Markdown, JSON, YAML or iCalendar.
+// glamour (pretty), raw Markdown, JSON, YAML, iCalendar, HTML or PDF.
 package render
 
 import (
@@ -25,6 +25,8 @@ const (
 	JSON     Format = "json"
 	YAML     Format = "yaml"
 	ICS      Format = "ics"
+	HTMLPage Format = "html"
+	PDF      Format = "pdf"
 )
 
 // ParseFormat validates a --output value.
@@ -40,8 +42,12 @@ func ParseFormat(s string) (Format, error) {
 		return YAML, nil
 	case "ics", "ical", "icalendar":
 		return ICS, nil
+	case "html", "htm":
+		return HTMLPage, nil
+	case "pdf":
+		return PDF, nil
 	}
-	return "", fmt.Errorf("unknown output format %q (pretty, markdown, json, yaml, ics)", s)
+	return "", fmt.Errorf("unknown output format %q (pretty, markdown, json, yaml, ics, html, pdf)", s)
 }
 
 // Renderer writes output in the selected format.
